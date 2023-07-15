@@ -394,7 +394,7 @@ static int vl53l0x_get_sampling_freq(const struct device *dev, struct sensor_val
 static int vl53l0x_set_sampling_freq(const struct device *dev, const struct sensor_value *val)
 {
 	struct vl53l0x_data *drv_data = dev->data;
-	uint64_t freq_microhertz = USEC_PER_SEC * val->val1 + val->val2;
+	uint64_t freq_microhertz = (uint64_t) USEC_PER_SEC * (uint64_t) (val->val1) + (uint64_t) (val->val2);
 	uint64_t timing;
 	int r;
 
@@ -402,11 +402,11 @@ static int vl53l0x_set_sampling_freq(const struct device *dev, const struct sens
 		return -EINVAL;
 	}
 
-	timing = USEC_PER_SEC * USEC_PER_SEC / freq_microhertz;
+	timing = (uint64_t)  USEC_PER_SEC * (uint64_t) USEC_PER_SEC / freq_microhertz;
 
 	r = VL53L0X_SetMeasurementTimingBudgetMicroSeconds(&drv_data->vl53l0x, (uint32_t)timing);
 	if (r) {
-		LOG_ERR("[%s] Unable to set measurement timing budget", dev->name);
+		LOG_ERR("[%s] Unable to set measurement timing budget to %d.%dHz %lldus: %d", dev->name, val->val1, val->val2, timing, r);
 		return r;
 	}
 	return r;
