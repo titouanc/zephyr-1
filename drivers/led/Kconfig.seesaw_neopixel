@@ -1,0 +1,7 @@
+# Copyright (c) 2024 Titouan Christophe
+# SPDX-License-Identifier: Apache-2.0
+
+config SEESAW_NEOPIXEL
+	bool "Adafruit Seesaw module neopixel subsystem"
+	default y
+	depends on ADAFRUIT_SEESAW && DT_HAS_ADAFRUIT_SEESAW_NEOPIXEL_ENABLED
