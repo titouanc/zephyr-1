@@ -1,0 +1,17 @@
+# Copyright (c) 2024 Titouan Christophe
+# SPDX-License-Identifier: Apache-2.0
+
+config INPUT_SEESAW_KEYPAD
+	bool "Adafruit Seesaw keypad input"
+	default y
+	depends on ADAFRUIT_SEESAW && DT_HAS_ADAFRUIT_SEESAW_KEYPAD_ENABLED
+	help
+	  Enable support for Adafruit Seesaw keypad input
+
+if INPUT_SEESAW_KEYPAD
+
+config INPUT_SEESAW_KEYPAD_POLL_INTERVAL
+	int "Event poll interval (ms)"
+	default 25
+
+endif
