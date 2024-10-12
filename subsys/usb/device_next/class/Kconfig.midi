@@ -1,0 +1,16 @@
+# Copyright (c) 2024 Titouan Christophe
+#
+# SPDX-License-Identifier: Apache-2.0
+
+config USBD_MIDI_CLASS
+	bool "USB MIDI class support [EXPERIMENTAL]"
+	help
+	  USB MIDI device class support.
+
+if USBD_MIDI_CLASS
+
+module = USBD_MIDI
+module-str = usbd midi
+source "subsys/logging/Kconfig.template.log_config"
+
+endif
