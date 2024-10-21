@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2024 Titouan Christophe
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+ #include <dt-bindings/usb/midi.h>
+
+/ {
+	usb_midi: usb_midi {
+		compatible = "zephyr,usb-midi";
+		status = "okay";
+
+		/* 48 channels in/out port */
+		midi_in_out {
+			compatible = "zephyr,usb-midi-group-terminal-block";
+			terminal-type = <BIDIRECTIONAL>;
+			block-size = <3>;
+		};
+
+		/* 32 channels in port */
+		midi_in {
+			compatible = "zephyr,usb-midi-group-terminal-block";
+			terminal-type = <INPUT_ONLY>;
+			block-size = <2>;
+		};
+
+		/* 16 channels out port */
+		midi_out {
+			compatible = "zephyr,usb-midi-group-terminal-block";
+			terminal-type = <OUTPUT_ONLY>;
+			block-size = <1>;
+		};
+	};
+};
