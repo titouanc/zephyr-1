@@ -1,0 +1,9 @@
+# Copyright (c) 2024 Titouan Christophe
+# SPDX-License-Identifier: Apache-2.0
+
+config ADAFRUIT_SEESAW
+	bool "Adafruit Seesaw module"
+	default y
+	depends on I2C && DT_HAS_ADAFRUIT_SEESAW_ENABLED
+	help
+	  Enable support for Adafruit seesaw module (core driver)
