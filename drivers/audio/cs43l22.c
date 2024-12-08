@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2024 Titouan Christophe
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/audio/codec.h>
@@ -7,6 +13,11 @@ LOG_MODULE_REGISTER(cirrus_cs43l22);
 
 #define DT_DRV_COMPAT cirrus_cs43l22
 
+/*
+ * See datasheet: https://statics.cirrus.com/pubs/proDatasheet/CS43L22_F2.pdf
+ */
+
+/* (datasheet) 6. REGISTER QUICK REFERENCE */
 #define REG_ID                       0x01
 #define REG_POWER_CTL_1              0x02
 #define REG_POWER_CTL_2              0x04
@@ -35,6 +46,21 @@ LOG_MODULE_REGISTER(cirrus_cs43l22);
 #define REG_STATUS                   0x2e
 #define REG_SPEAKER_STATUS           0x31
 
+/* (datasheet) 7.5.4 DAC Interface Format */
+#define DAC_IF_FORMAT_LEFT_JUSTIFIED  0
+#define DAC_IF_FORMAT_I2S             1
+#define DAC_IF_FORMAT_RIGHT_JUSTIFIED 2
+
+/* (datasheet) 7.5.5 Audio Word Length */
+#define WORDLEN_32       0
+#define WORDLEN_24       1
+#define WORDLEN_20       2
+#define WORDLEN_16       3
+#define WORDLEN_RIGHT_24 0
+#define WORDLEN_RIGHT_20 1
+#define WORDLEN_RIGHT_18 2
+#define WORDLEN_RIGHT_16 3
+
 #define cs43l22_write(_i2c, _reg, _value) cs43l22_write_masked(_i2c, _reg, _value, 0xff)
 static inline int cs43l22_write_masked(const struct i2c_dt_spec *i2c, uint8_t reg, uint8_t value,
 				       uint8_t mask)
@@ -48,7 +74,7 @@ static inline int cs43l22_write_masked(const struct i2c_dt_spec *i2c, uint8_t re
 			return ret;
 		}
 	}
-	actual_value |= (value & mask);
+	actual_value = (actual_value & ~mask) | (value & mask);
 	return i2c_burst_write_dt(i2c, reg, &actual_value, 1);
 }
 
@@ -62,17 +88,73 @@ struct cs43l22_config {
 
 static int cs43l22_configure(const struct device *dev, struct audio_codec_cfg *audiocfg)
 {
+	uint8_t format, wordlen;
 	const struct cs43l22_config *cfg = dev->config;
+
+	if (audiocfg->dai_route != AUDIO_ROUTE_PLAYBACK) {
+		return -ENOTSUP;
+	}
+
+	switch (audiocfg->dai_type) {
+	case AUDIO_DAI_TYPE_LEFT_JUSTIFIED:
+		format = DAC_IF_FORMAT_LEFT_JUSTIFIED;
+		break;
+	case AUDIO_DAI_TYPE_I2S:
+		format = DAC_IF_FORMAT_I2S;
+		break;
+	case AUDIO_DAI_TYPE_RIGHT_JUSTIFIED:
+		format = DAC_IF_FORMAT_RIGHT_JUSTIFIED;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	if (format == DAC_IF_FORMAT_RIGHT_JUSTIFIED) {
+		switch (audiocfg->dai_cfg.i2s.word_size) {
+		case 16:
+			wordlen = WORDLEN_16;
+			break;
+		case 20:
+			wordlen = WORDLEN_20;
+			break;
+		case 24:
+			wordlen = WORDLEN_24;
+			break;
+		case 32:
+			wordlen = WORDLEN_32;
+			break;
+		default:
+			return -ENOTSUP;
+		}
+	} else {
+		switch (audiocfg->dai_cfg.i2s.word_size) {
+		case 16:
+			wordlen = WORDLEN_RIGHT_16;
+			break;
+		case 18:
+			wordlen = WORDLEN_RIGHT_18;
+			break;
+		case 20:
+			wordlen = WORDLEN_RIGHT_20;
+			break;
+		case 24:
+			wordlen = WORDLEN_RIGHT_24;
+			break;
+		default:
+			return -ENOTSUP;
+		}
+	}
 
 	cs43l22_power_down(&cfg->i2c);
 	/* Headphones always on, speaker always off */
 	cs43l22_write(&cfg->i2c, REG_POWER_CTL_2, 0xaf);
 	/* Automatic clock detection */
 	cs43l22_write(&cfg->i2c, REG_CLOCKING_CTL, 0x80);
-	/* Slave mode, I2S 16bit format */
-	cs43l22_write_masked(&cfg->i2c, REG_INTERFACE_CTL_1, 0x07, 0xdf);
+	/* Slave mode, do not invert SCLK, disable DSP, requested frame format */
+	cs43l22_write_masked(&cfg->i2c, REG_INTERFACE_CTL_1, (format << 2) | wordlen, 0xdf);
 	/* Enable soft ramp for volume changes */
 	cs43l22_write(&cfg->i2c, REG_MISC_CTL, 0x02);
+
 	cs43l22_power_up(&cfg->i2c);
 	return 0;
 }
