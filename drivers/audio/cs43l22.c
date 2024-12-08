@@ -43,6 +43,8 @@ LOG_MODULE_REGISTER(cirrus_cs43l22);
 #define REG_MASTER_B_VOL             0x21
 #define REG_HEADPHONES_A_VOL         0x22
 #define REG_HEADPHONES_B_VOL         0x23
+#define REG_SPEAKER_A_VOL         0x22
+#define REG_SPEAKER_B_VOL         0x23
 #define REG_STATUS                   0x2e
 #define REG_SPEAKER_STATUS           0x31
 
@@ -60,6 +62,12 @@ LOG_MODULE_REGISTER(cirrus_cs43l22);
 #define WORDLEN_RIGHT_20 1
 #define WORDLEN_RIGHT_18 2
 #define WORDLEN_RIGHT_16 3
+
+/* (datasheet) 7.12 Playback Control 2 */
+#define HEADPHONES_B_MUTE (1 << 7)
+#define HEADPHONES_A_MUTE (1 << 6)
+#define SPEAKER_B_MUTE    (1 << 5)
+#define SPEAKER_A_MUTE    (1 << 4)
 
 #define cs43l22_write(_i2c, _reg, _value) cs43l22_write_masked(_i2c, _reg, _value, 0xff)
 static inline int cs43l22_write_masked(const struct i2c_dt_spec *i2c, uint8_t reg, uint8_t value,
@@ -159,12 +167,55 @@ static int cs43l22_configure(const struct device *dev, struct audio_codec_cfg *a
 	return 0;
 }
 
+static void cs43l22_start_output(const struct device *dev)
+{
+}
+
+static void cs43l22_stop_output(const struct device *dev)
+{
+}
+
+static int cs43l22_set_property(const struct device *dev, audio_property_t property,
+			        audio_channel_t channel, audio_property_value_t val)
+{
+	const struct cs43l22_config *cfg = dev->config;
+
+	if (property == AUDIO_PROPERTY_OUTPUT_MUTE) {
+		uint8_t dac_channel_mute = 0;
+		switch (channel) {
+		case AUDIO_CHANNEL_ALL:
+			dac_channel_mute = HEADPHONES_A_MUTE
+			             | HEADPHONES_B_MUTE
+			             | SPEAKER_A_MUTE
+			             | SPEAKER_B_MUTE;
+			break;
+		case AUDIO_CHANNEL_HEADPHONE_LEFT:
+			dac_channel_mute = HEADPHONES_A_MUTE;
+			break;
+		case AUDIO_CHANNEL_HEADPHONE_RIGHT:
+			dac_channel_mute = HEADPHONES_B_MUTE;
+			break;
+		case AUDIO_CHANNEL_FRONT_LEFT:
+			dac_channel_mute = SPEAKER_A_MUTE;
+			break;
+		case AUDIO_CHANNEL_FRONT_RIGHT:
+			dac_channel_mute = SPEAKER_B_MUTE;
+			break;
+		default:
+			return -ENOTSUP;
+		}
+		return cs43l22_write_masked(&cfg->i2c, REG_PLAYBACK_CTL_2, val.mute ? dac_channel_mute : 0, dac_channel_mute);
+	}
+
+	return -ENOTSUP;
+}
+
 static const struct audio_codec_api cs43l22_api = {
 	.configure = cs43l22_configure,
-	/*.start_output = wm8904_start_output,
-	.stop_output = wm8904_stop_output,
-	.set_property = wm8904_set_property,
-	.apply_properties = wm8904_apply_properties,
+	.start_output = cs43l22_start_output,
+	.stop_output = cs43l22_stop_output,
+	.set_property = cs43l22_set_property,
+	/*.apply_properties = wm8904_apply_properties,
 	.route_input = wm8904_route_input,*/
 };
 
