@@ -67,6 +67,7 @@
 #define CS_STRING		0x23
 #define CS_INTERFACE		0x24
 #define CS_ENDPOINT		0x25
+#define CS_GR_TRM_BLOCK		0x26
 
 /* A.9 Audio Class-Specific AC Interface Descriptor Subtypes */
 #define AC_DESCRIPTOR_UNDEFINED			0x00
@@ -94,6 +95,7 @@
 /* A.13 Audio Class-Specific Endpoint Descriptor Subtypes */
 #define DESCRIPTOR_UNDEFINED			0x00
 #define EP_GENERAL				0x01
+#define EP_GENERAL_2_0				0x02
 
 /* Universal Serial Bus Device Class Definition for Audio Data Formats
  * Release 2.0, May 31, 2006. A.1 Format Type Codes
