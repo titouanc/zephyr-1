@@ -71,7 +71,7 @@ static int dispatch_command_packet(const uint8_t *cmd_pkt, size_t cmd_pkt_len, u
 		return 4;
 
 	case COMMAND_UMP_DATA:
-		if (cmd_pkt[1] > 4) {
+		if (cmd_pkt[0] < 1 || cmd_pkt[1] > 4) {
 			LOG_ERR("Invalid UMP payload length (%d)", cmd_pkt[1]);
 			return 0;
 		}
