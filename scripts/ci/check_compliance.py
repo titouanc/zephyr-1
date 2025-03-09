@@ -924,7 +924,7 @@ Missing SoC names or CONFIG_SOC vs soc.yml out of sync:
         # so we extract the references from each line ourselves instead.
         #
         # The regex uses word boundaries (\b) to isolate the reference, and
-        # negative lookahead to automatically whitelist the following:
+        # negative lookahead to automatically allowlist the following:
         #
         #  - ##, for token pasting (CONFIG_FOO_##X)
         #
@@ -1182,6 +1182,9 @@ class SysbuildKconfigCheck(KconfigCheck):
     UNDEF_KCONFIG_ALLOWLIST = {
         # zephyr-keep-sorted-start re(^\s+")
         "FOO",
+        "MY_IMAGE", # Used in sysbuild documentation as example
+        "OTHER_APP_IMAGE_NAME", # Used in sysbuild documentation as example
+        "OTHER_APP_IMAGE_PATH", # Used in sysbuild documentation as example
         "SECOND_SAMPLE", # Used in sysbuild documentation
         "SUIT_ENVELOPE", # Used by nRF runners to program provisioning data
         "SUIT_MPI_APP_AREA_PATH", # Used by nRF runners to program provisioning data
