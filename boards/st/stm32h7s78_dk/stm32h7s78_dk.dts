@@ -212,22 +212,22 @@
 
 			slot0_partition: partition@0 {
 				label = "image-0";
-				reg = <0x00040000 DT_SIZE_M(16)>;
+				reg = <0x00000000 DT_SIZE_M(16)>;
 			};
 
 			slot1_partition: partition@1000000 {
 				label = "image-1";
-				reg = <0x00080000 DT_SIZE_M(16)>;
+				reg = <0x01000000 DT_SIZE_M(16)>;
 			};
 
 			scratch_partition: partition@2000000 {
 				label = "image-scratch";
-				reg = <0x000c0000 DT_SIZE_M(16)>;
+				reg = <0x02000000 DT_SIZE_M(16)>;
 			};
 
 			storage_partition: partition@3000000 {
 				label = "storage";
-				reg = <0x00020000 DT_SIZE_M(80)>;
+				reg = <0x03000000 DT_SIZE_M(80)>;
 			};
 		};
 	};
