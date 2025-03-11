@@ -428,7 +428,7 @@
 			status = "disabled";
 		};
 
-		xspi1: xspi@52005000 {
+		xspi1: spi@52005000 {
 			compatible = "st,stm32-xspi";
 			reg = <0x52005000 0x1000>;
 			interrupts = <105 0>;
@@ -439,7 +439,7 @@
 			status = "disabled";
 		};
 
-		xspi2: xspi@5200a000 {
+		xspi2: spi@5200a000 {
 			compatible = "st,stm32-xspi";
 			reg = <0x5200a000 0x1000>;
 			interrupts = <106 0>;
