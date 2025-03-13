@@ -433,7 +433,7 @@
 			reg = <0x52005000 0x1000>;
 			interrupts = <105 0>;
 			clock-names = "bus";
-			clocks = <&rcc STM32_CLOCK(AHB5, 14U)>;
+			clocks = <&rcc STM32_CLOCK(AHB5, 5U)>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
