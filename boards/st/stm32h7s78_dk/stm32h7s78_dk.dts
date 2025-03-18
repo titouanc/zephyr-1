@@ -10,6 +10,7 @@
 #include "arduino_r3_connector.dtsi"
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/flash_controller/xspi.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 
 / {
 	model = "STMicroelectronics STM32H7S78 DISCOVERY KIT board";
@@ -61,6 +62,11 @@
 		volt-sensor0 = &vref;
 		volt-sensor1 = &vbat;
 	};
+};
+
+&ext_memory {
+	/* ATTR_MPU_EXTMEM is causing MPU FAULT */
+	zephyr,memory-attr = <DT_MEM_ARM_MPU_IO>;
 };
 
 &clk_hsi48 {
