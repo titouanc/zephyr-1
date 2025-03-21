@@ -7,5 +7,6 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(netmidi2)
 
 target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/netmidi2.c)
 
 include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
