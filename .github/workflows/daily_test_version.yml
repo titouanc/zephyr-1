@@ -10,6 +10,9 @@ on:
     branches:
     - refs/tags/*
 
+permissions:
+  contents: read
+
 jobs:
   get_version:
     runs-on: ubuntu-22.04
@@ -28,7 +31,7 @@ jobs:
         pip install gitpython
 
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         fetch-depth: 0
 

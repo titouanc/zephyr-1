@@ -4,6 +4,9 @@ on:
   schedule:
   - cron: '*/10 * * * *'
 
+permissions:
+  contents: read
+
 env:
   OUTPUT_FILE_NAME: IssuesReport.md
   COMMITTER_EMAIL: actions@github.com
@@ -35,7 +38,7 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: upload-stats
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
       continue-on-error: true
       with:
         name: ${{ env.OUTPUT_FILE_NAME }}
