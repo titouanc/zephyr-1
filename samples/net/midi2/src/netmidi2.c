@@ -5,6 +5,43 @@ LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_DBG);
 
 #define BUFSIZE 256
 
+static inline void udp_midi_session_free(struct udp_midi_session *session)
+{
+	memset(session, 0, sizeof(struct udp_midi_session));
+}
+
+static inline struct udp_midi_session *udp_midi_match_session(
+	struct udp_midi_ep *ep,	struct sockaddr *peer_addr, socklen_t peer_addr_len
+)
+{
+	for (size_t i=0; i<ep->n_peers; i++) {
+		if (
+			ep->peers[i].addr_len == peer_addr_len &&
+			memcmp(&ep->peers[i].addr, peer_addr, peer_addr_len) == 0
+		) {
+			return &ep->peers[i];
+		}
+	}
+
+	return NULL;
+}
+
+static inline struct udp_midi_session *udp_midi_alloc_session(
+	struct udp_midi_ep *ep, struct sockaddr *peer_addr, socklen_t peer_addr_len
+)
+{
+	for (size_t i=0; i<ep->n_peers; i++) {
+		if (ep->peers[i].state == NOT_INITIALIZED) {
+			ep->peers[i].state = IDLE;
+			ep->peers[i].addr_len = peer_addr_len;
+			memcpy(&ep->peers[i].addr, peer_addr, peer_addr_len);
+			return &ep->peers[i];
+		}
+	}
+
+	return NULL;
+}
+
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 					    struct net_buf_simple *rx,
 					    struct net_buf_simple *tx)
@@ -85,6 +122,7 @@ static void udp_midi_rx_do_work(struct k_work *work)
 	struct udp_midi_ep *ep = CONTAINER_OF(work, struct udp_midi_ep, rx_work);
 	struct net_buf_simple *rxbuf = NET_BUF_SIMPLE(BUFSIZE);
 	struct net_buf_simple *txbuf = NET_BUF_SIMPLE(BUFSIZE);
+	struct udp_midi_session *sess;
 
 	net_buf_simple_init(rxbuf, 0);
 	net_buf_simple_init(txbuf, 0);
@@ -109,6 +147,8 @@ static void udp_midi_rx_do_work(struct k_work *work)
 
 	net_buf_simple_pull(rxbuf, 4);
 	net_buf_simple_add_mem(txbuf, "MIDI", 4);
+
+	sess = udp_midi_match_session(ep, &peer_addr, peer_addr_len);
 
 	/* Parse contained command packets */
 	while (
