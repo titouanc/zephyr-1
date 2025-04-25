@@ -312,14 +312,21 @@ static int memc_stm32_xspi_psram_init(const struct device *dev)
 	}
 
 	mem_mapped_cfg.TimeOutActivation = HAL_XSPI_TIMEOUT_COUNTER_DISABLE;
+
+#if defined(XSPI_CR_NOPREF)
 	mem_mapped_cfg.NoPrefetchData = HAL_XSPI_AUTOMATIC_PREFETCH_ENABLE;
+#endif
+#if defined(XSPI_CR_NOPREF_AXI)
 	mem_mapped_cfg.NoPrefetchAXI = HAL_XSPI_AXI_PREFETCH_DISABLE;
+#endif
 
 	if (HAL_XSPI_MemoryMapped(&hxspi, &mem_mapped_cfg) != HAL_OK) {
 		return -EIO;
 	}
 
+#if defined(XSPI_CR_NOPREF)
 	MODIFY_REG(xspi->CR, XSPI_CR_NOPREF, HAL_XSPI_AUTOMATIC_PREFETCH_DISABLE);
+#endif
 
 	return 0;
 }
