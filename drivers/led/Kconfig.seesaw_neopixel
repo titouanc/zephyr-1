@@ -1,0 +1,10 @@
+# Copyright 2025 Titouan Chrisotphe
+# SPDX-License-Identifier: Apache-2.0
+
+config SEESAW_NEOPIXEL
+	bool "Adafruit Seesaw neopixel leds over I2C"
+	default y
+	depends on MFD_SEESAW
+	depends on DT_HAS_ADAFRUIT_SEESAW_NEOPIXEL_ENABLED
+	help
+	  Enable support for Adafruit Seesaw neopixel leds
