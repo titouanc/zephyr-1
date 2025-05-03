@@ -1,0 +1,10 @@
+# Copyright 2025 Titouan Chrisotphe
+# SPDX-License-Identifier: Apache-2.0
+
+config PWM_SEESAW
+	bool "Adafruit Seesaw PWM over I2C"
+	default y
+	depends on MFD_SEESAW
+	depends on DT_HAS_ADAFRUIT_SEESAW_PWM_ENABLED
+	help
+	  Enable support for Adafruit Seesaw pwm
