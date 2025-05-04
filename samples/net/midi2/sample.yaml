@@ -1,0 +1,7 @@
+common:
+  harness: net
+  tags:
+    - net
+sample:
+  description: Test UDP transport for Universal MIDI Packets
+  name: Network MIDI2
