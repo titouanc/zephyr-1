@@ -8,10 +8,18 @@
 if BOARD_STM32H7S78_DK
 
 if NETWORKING
-
 config NET_L2_ETHERNET
 	default y
-
 endif # NETWORKING
+
+if DISPLAY
+config MEMC
+	# Framebuffer is in PSRAM which needs the memory controller
+	default y
+
+choice STM32_LTDC_PIXEL_FORMAT
+	default STM32_LTDC_RGB888
+endchoice
+endif # DISPLAY
 
 endif # BOARD_STM32H7S78_DK
