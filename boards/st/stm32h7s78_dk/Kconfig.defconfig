@@ -18,4 +18,9 @@ config MEMC
 	default y
 endif # DISPLAY
 
+if INPUT
+config INPUT_GT911_INTERRUPT
+	default y
+endif # INPUT
+
 endif # BOARD_STM32H7S78_DK
