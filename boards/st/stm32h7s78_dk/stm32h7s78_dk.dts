@@ -171,6 +171,16 @@
 &i2c1 {
 	pinctrl-0 = <&i2c1_scl_pb6 &i2c1_sda_pb9>;
 	pinctrl-names = "default";
+	status = "okay";
+
+	audio_codec: wm8904g@1a {
+		compatible = "wolfson,wm8904";
+		reg = <0x1a>;
+	};
+};
+
+&i2s6 {
+	status = "okay";
 };
 
 &die_temp {
