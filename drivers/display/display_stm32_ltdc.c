@@ -44,21 +44,16 @@ LOG_MODULE_REGISTER(display_stm32_ltdc, CONFIG_DISPLAY_LOG_LEVEL);
 #define LTDC_PCPOL_ACTIVE_LOW     0x00000000
 #define LTDC_PCPOL_ACTIVE_HIGH    0x10000000
 
-#if CONFIG_STM32_LTDC_ARGB8888
-#define STM32_LTDC_INIT_PIXEL_SIZE	4u
-#define STM32_LTDC_INIT_PIXEL_FORMAT	LTDC_PIXEL_FORMAT_ARGB8888
-#define DISPLAY_INIT_PIXEL_FORMAT	PIXEL_FORMAT_ARGB_8888
-#elif CONFIG_STM32_LTDC_RGB888
-#define STM32_LTDC_INIT_PIXEL_SIZE	3u
-#define STM32_LTDC_INIT_PIXEL_FORMAT	LTDC_PIXEL_FORMAT_RGB888
-#define DISPLAY_INIT_PIXEL_FORMAT	PIXEL_FORMAT_RGB_888
-#elif CONFIG_STM32_LTDC_RGB565
-#define STM32_LTDC_INIT_PIXEL_SIZE	2u
-#define STM32_LTDC_INIT_PIXEL_FORMAT	LTDC_PIXEL_FORMAT_RGB565
-#define DISPLAY_INIT_PIXEL_FORMAT	PIXEL_FORMAT_RGB_565
-#else
-#error "Invalid LTDC pixel format chosen"
-#endif
+#define SUPPORTED_PIXEL_FORMATS \
+	(PIXEL_FORMAT_RGB_888 | PIXEL_FORMAT_ARGB_8888 | PIXEL_FORMAT_RGB_565)
+
+#define DT_INST_PIXEL_FORMAT(inst) \
+	DT_INST_PROP(inst, pixel_format)
+
+#define PIXEL_FORMAT_TO_LTDC(fmt)						\
+	((((fmt & PIXEL_FORMAT_RGB_888) >> 0) * LTDC_PIXEL_FORMAT_RGB888) |	\
+	(((fmt & PIXEL_FORMAT_ARGB_8888) >> 3) * LTDC_PIXEL_FORMAT_ARGB8888) |	\
+	(((fmt & PIXEL_FORMAT_RGB_565) >> 4) * LTDC_PIXEL_FORMAT_RGB565))
 
 struct display_stm32_ltdc_data {
 	LTDC_HandleTypeDef hltdc;
@@ -82,6 +77,7 @@ struct display_stm32_ltdc_config {
 	const struct pinctrl_dev_config *pctrl;
 	void (*irq_config_func)(const struct device *dev);
 	const struct device *display_controller;
+	enum display_pixel_format dt_pixel_format;
 };
 
 static void stm32_ltdc_global_isr(const struct device *dev)
@@ -419,8 +415,8 @@ static int stm32_ltdc_init(const struct device *dev)
 	/* reset LTDC peripheral */
 	(void)reset_line_toggle_dt(&config->reset);
 
-	data->current_pixel_format = DISPLAY_INIT_PIXEL_FORMAT;
-	data->current_pixel_size = STM32_LTDC_INIT_PIXEL_SIZE;
+	data->current_pixel_format = config->dt_pixel_format;
+	data->current_pixel_size = DISPLAY_BITS_PER_PIXEL(config->dt_pixel_format) / 8;
 
 	k_sem_init(&data->sem, 0, 1);
 
@@ -576,8 +572,9 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 #define STM32_LTDC_DEVICE_PINCTRL_GET(n) PINCTRL_DT_INST_DEV_CONFIG_GET(n)
 #endif
 
-#define STM32_LTDC_FRAME_BUFFER_LEN(inst)							\
-	(STM32_LTDC_INIT_PIXEL_SIZE * DT_INST_PROP(inst, height) * DT_INST_PROP(inst, width))	\
+#define STM32_LTDC_FRAME_BUFFER_LEN(inst)				\
+	(DISPLAY_BITS_PER_PIXEL(DT_INST_PIXEL_FORMAT(inst)) / 8 	\
+	* DT_INST_PROP(inst, height) * DT_INST_PROP(inst, width))	\
 
 #if defined(CONFIG_STM32_LTDC_FB_USE_SHARED_MULTI_HEAP)
 #define STM32_LTDC_FRAME_BUFFER_ADDR(inst)  (NULL)
@@ -591,7 +588,9 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 #endif
 
 #define STM32_LTDC_DEVICE(inst)									\
-	STM32_LTDC_FRAME_BUFFER_DEFINE(inst);                       \
+	BUILD_ASSERT(DT_INST_PIXEL_FORMAT(inst) & SUPPORTED_PIXEL_FORMATS,			\
+		     "Unsupported pixel format");						\
+	STM32_LTDC_FRAME_BUFFER_DEFINE(inst);							\
 	STM32_LTDC_DEVICE_PINCTRL_INIT(inst);							\
 	PM_DEVICE_DT_INST_DEFINE(inst, stm32_ltdc_pm_action);					\
 	static void stm32_ltdc_irq_config_func_##inst(const struct device *dev)			\
@@ -673,7 +672,7 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 				.WindowY0 = DT_INST_PROP_OR(inst, window0_y0, 0),		\
 				.WindowY1 = DT_INST_PROP_OR(inst, window0_y1,			\
 								DT_INST_PROP(inst, height)),	\
-				.PixelFormat = STM32_LTDC_INIT_PIXEL_FORMAT,			\
+				.PixelFormat = PIXEL_FORMAT_TO_LTDC(DT_INST_PIXEL_FORMAT(inst)),\
 				.Alpha = 255,							\
 				.Alpha0 = 0,							\
 				.BlendingFactor1 = LTDC_BLENDING_FACTOR1_PAxCA,			\
@@ -701,12 +700,13 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 		.bl_ctrl_gpio = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, bl_ctrl_gpios),		\
 				(GPIO_DT_SPEC_INST_GET(inst, bl_ctrl_gpios)), ({ 0 })),		\
 		.reset = RESET_DT_SPEC_INST_GET(0),						\
-		.pclken = pclken_##inst,					\
-		.pclk_len = DT_INST_NUM_CLOCKS(inst),				\
+		.pclken = pclken_##inst,							\
+		.pclk_len = DT_INST_NUM_CLOCKS(inst),						\
 		.pctrl = STM32_LTDC_DEVICE_PINCTRL_GET(inst),					\
 		.irq_config_func = stm32_ltdc_irq_config_func_##inst,				\
 		.display_controller = DEVICE_DT_GET_OR_NULL(					\
 			DT_INST_PHANDLE(inst, display_controller)),				\
+		.dt_pixel_format = DT_INST_PIXEL_FORMAT(inst),					\
 	};											\
 	DEVICE_DT_INST_DEFINE(inst,								\
 			&stm32_ltdc_init,							\
