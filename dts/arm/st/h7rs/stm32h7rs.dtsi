@@ -496,8 +496,10 @@
 			compatible = "st,stm32-xspi";
 			reg = <0x52005000 0x1000>, <0x90000000 DT_SIZE_M(256)>;
 			interrupts = <105 0>;
-			clock-names = "xspix";
-			clocks = <&rcc STM32_CLOCK(AHB5, 5U)>;
+			clock-names = "xspix", "xspi-ker", "xspi-mgr";
+			clocks = <&rcc STM32_CLOCK(AHB5, 5U)>,
+				<&rcc STM32_SRC_HCLK5 XSPI1_SEL(0)>,
+				<&rcc STM32_CLOCK(AHB5, 14U)>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
@@ -507,8 +509,10 @@
 			compatible = "st,stm32-xspi";
 			reg = <0x5200a000 0x1000>, <0x70000000 DT_SIZE_M(256)>;
 			interrupts = <106 0>;
-			clock-names = "xspix";
-			clocks = <&rcc STM32_CLOCK(AHB5, 12U)>;
+			clock-names = "xspix", "xspi-ker", "xspi-mgr";
+			clocks = <&rcc STM32_CLOCK(AHB5, 12U)>,
+				<&rcc STM32_SRC_HCLK5 XSPI2_SEL(0)>,
+				<&rcc STM32_CLOCK(AHB5, 14U)>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
@@ -810,6 +814,17 @@
 			phys = <&otgfs_phy>;
 			clocks = <&rcc STM32_CLOCK(AHB1, 27U)>,
 				 <&rcc STM32_SRC_HSI48 OTGFS_SEL(0)>;
+			status = "disabled";
+		};
+
+		ltdc: display-controller@50001000 {
+			compatible = "st,stm32-ltdc";
+			reg = <0x50001000 0x400>;
+			interrupts = <96 0>, <97 0>;
+			interrupt-names = "ltdc", "ltdc_er";
+			clocks = <&rcc STM32_CLOCK(APB5, 1U)>,
+				 <&rcc STM32_SRC_PLL3_R NO_SEL>;
+			resets = <&rctl STM32_RESET(APB5, 1U)>;
 			status = "disabled";
 		};
 	};
