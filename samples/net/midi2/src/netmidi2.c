@@ -114,7 +114,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	return 0;
 }
 
-static void udp_midi_rx_do_work(struct k_work *work)
+static void udp_midi_rx_work(struct k_work *work)
 {
 	int ret;
 	struct sockaddr peer_addr;
@@ -187,7 +187,7 @@ int udp_midi_ep_start(struct udp_midi_ep *ep,
 		ret = -errno;
 	}
 
-	k_work_init(&ep->rx_work, udp_midi_rx_do_work);
+	k_work_init(&ep->rx_work, udp_midi_rx_work);
 	k_work_submit(&ep->rx_work);
 
 	return ret;
