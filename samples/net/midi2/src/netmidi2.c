@@ -118,7 +118,7 @@ static void udp_midi_rx_work(struct k_work *work)
 {
 	int ret;
 	struct sockaddr peer_addr;
-	socklen_t peer_addr_len;
+	socklen_t peer_addr_len = sizeof(peer_addr);
 	struct udp_midi_ep *ep = CONTAINER_OF(work, struct udp_midi_ep, rx_work);
 	struct net_buf_simple *rxbuf = NET_BUF_SIMPLE(BUFSIZE);
 	struct net_buf_simple *txbuf = NET_BUF_SIMPLE(BUFSIZE);
