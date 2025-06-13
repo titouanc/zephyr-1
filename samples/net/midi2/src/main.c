@@ -23,16 +23,16 @@ UDP_MIDI_EP_DECLARE(midi_server, 10);
 
 static const struct ump_endpoint_dt_spec ump_ep = UMP_ENDPOINT_DT_SPEC_GET(DT_NODELABEL(midi2));
 
-static const struct ump_stream_responder_cfg responder_cfg = {
-	.dev = &midi_server,
-	.send = (void (*)(void *, const struct midi_ump)) udp_midi_send,
-	.ep_spec = &ump_ep,
-};
-
-static void netmidi2_callback(struct udp_midi_ep *ep, const struct midi_ump ump)
+static void netmidi2_callback(struct udp_midi_session *session,
+			      const struct midi_ump ump)
 {
-	LOG_INF("[%p] Rx MIDI MT=%02X", ep, UMP_MT(ump));
+	LOG_INF("Rx MIDI MT=%02X", UMP_MT(ump));
 	if (UMP_MT(ump) == UMP_MT_UMP_STREAM) {
+		const struct ump_stream_responder_cfg responder_cfg = {
+			.dev = session,
+			.send = (void (*)(void *, const struct midi_ump)) udp_midi_send,
+			.ep_spec = &ump_ep,
+		};
 		ump_stream_responder(&responder_cfg, ump);
 	}
 }
