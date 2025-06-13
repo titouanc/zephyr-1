@@ -35,13 +35,17 @@ static inline struct udp_midi_session *udp_midi_alloc_session(
 	socklen_t peer_addr_len
 )
 {
+	struct udp_midi_session *sess;
+
 	for (size_t i=0; i<ep->n_peers; i++) {
-		if (ep->peers[i].state == NOT_INITIALIZED) {
-			ep->peers[i].state = IDLE;
-			ep->peers[i].addr_len = peer_addr_len;
-			memcpy(&ep->peers[i].addr, peer_addr, peer_addr_len);
+		sess = &ep->peers[i];
+		if (sess->state == NOT_INITIALIZED) {
+			sess->state = IDLE;
+			sess->addr_len = peer_addr_len;
+			sess->ep = ep;
+			memcpy(&sess->addr, peer_addr, peer_addr_len);
 			LOG_DBG("Allocated new client session %d", i);
-			return &ep->peers[i];
+			return sess;
 		}
 	}
 
@@ -99,6 +103,12 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		return 0;
 
 	case COMMAND_UMP_DATA:
+		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
+		if (! session) {
+			LOG_WRN("Receiving UMP data without an active session");
+			return -1;
+		}
+
 		if (payload_len_words < 1 || payload_len_words > 4) {
 			LOG_ERR("Invalid UMP length");
 			return -1;
@@ -114,7 +124,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		if (ep->rx_packet_cb){
-			ep->rx_packet_cb(ep, ump);
+			ep->rx_packet_cb(session, ump);
 		}
 		return 0;
 
@@ -202,7 +212,7 @@ int udp_midi_ep_start(struct udp_midi_ep *ep,
 	return ret;
 }
 
-void udp_midi_send(struct udp_midi_ep *ep, const struct midi_ump ump)
+void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump)
 {
 	uint8_t buf[8 + sizeof(ump)] = "MIDI";
 	buf[4] = COMMAND_UMP_DATA;
@@ -220,4 +230,25 @@ void udp_midi_send(struct udp_midi_ep *ep, const struct midi_ump ump)
 		zsock_sendto(ep->sock, buf, 8+4*UMP_NUM_WORDS(ump), 0,
 			     &ep->peers[i].addr, ep->peers[i].addr_len);
 	}
+}
+
+void udp_midi_send(struct udp_midi_session *sess, const struct midi_ump ump)
+{
+	uint8_t buf[8 + sizeof(ump)] = "MIDI";
+	uint32_t *buf32 = (uint32_t *) &buf[8];
+
+	if (sess->state != ESTABLISHED_SESSION){
+		LOG_WRN("Attempting to send data on an un-established session");
+		return;
+	}
+
+	buf[4] = COMMAND_UMP_DATA;
+	buf[5] = UMP_NUM_WORDS(ump);
+	for (size_t i=0; i<UMP_NUM_WORDS(ump); i++) {
+		buf32[i] = sys_cpu_to_be32(ump.data[i]);
+	}
+
+	LOG_HEXDUMP_DBG(buf, 8+4*UMP_NUM_WORDS(ump), "Send UDP");
+	zsock_sendto(sess->ep->sock, buf, 8+4*UMP_NUM_WORDS(ump), 0,
+		     &sess->addr, sess->addr_len);
 }
