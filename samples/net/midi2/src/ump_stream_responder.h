@@ -27,7 +27,7 @@ struct ump_stream_responder_cfg {
 
 #define UMP_BLOCK_DT_SPEC_GET(_node)                                   \
 {                                                                      \
-	.name = DT_NODE_FULL_NAME(_node),                                  \
+	.name = DT_PROP_OR(_node, label, DT_NODE_FULL_NAME(_node)),        \
 	.first_group = DT_REG_ADDR(_node),                                 \
 	.groups_spanned = DT_REG_SIZE(_node),                              \
 	.is_input = !DT_ENUM_HAS_VALUE(_node, terminal_type, output_only), \
@@ -40,7 +40,7 @@ struct ump_stream_responder_cfg {
 
 #define UMP_ENDPOINT_DT_SPEC_GET(_node) \
 { \
-	.name = DT_NODE_FULL_NAME(_node), \
+	.name = DT_PROP_OR(_node, label, DT_NODE_FULL_NAME(_node)), \
 	.n_blocks = DT_FOREACH_CHILD_SEP(_node, DT_NODE_HAS_STATUS_OKAY, (+)), \
 	.blocks = {DT_FOREACH_CHILD(_node, UMP_BLOCK_SEP_IF_OKAY)}, \
 }
