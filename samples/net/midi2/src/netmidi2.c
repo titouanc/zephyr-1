@@ -11,7 +11,9 @@ static inline void udp_midi_session_free(struct udp_midi_session *session)
 }
 
 static inline struct udp_midi_session *udp_midi_match_session(
-	struct udp_midi_ep *ep,	struct sockaddr *peer_addr, socklen_t peer_addr_len
+	struct udp_midi_ep *ep,
+	struct sockaddr *peer_addr,
+	socklen_t peer_addr_len
 )
 {
 	for (size_t i=0; i<ep->n_peers; i++) {
@@ -19,6 +21,7 @@ static inline struct udp_midi_session *udp_midi_match_session(
 			ep->peers[i].addr_len == peer_addr_len &&
 			memcmp(&ep->peers[i].addr, peer_addr, peer_addr_len) == 0
 		) {
+			LOG_DBG("Found matching client session %d", i);
 			return &ep->peers[i];
 		}
 	}
@@ -27,7 +30,9 @@ static inline struct udp_midi_session *udp_midi_match_session(
 }
 
 static inline struct udp_midi_session *udp_midi_alloc_session(
-	struct udp_midi_ep *ep, struct sockaddr *peer_addr, socklen_t peer_addr_len
+	struct udp_midi_ep *ep,
+	struct sockaddr *peer_addr,
+	socklen_t peer_addr_len
 )
 {
 	for (size_t i=0; i<ep->n_peers; i++) {
@@ -35,14 +40,18 @@ static inline struct udp_midi_session *udp_midi_alloc_session(
 			ep->peers[i].state = IDLE;
 			ep->peers[i].addr_len = peer_addr_len;
 			memcpy(&ep->peers[i].addr, peer_addr, peer_addr_len);
+			LOG_DBG("Allocated new client session %d", i);
 			return &ep->peers[i];
 		}
 	}
 
+	LOG_ERR("Not any free slot for a new client session");
 	return NULL;
 }
 
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
+					    struct sockaddr *peer_addr,
+					    socklen_t peer_addr_len,
 					    struct net_buf_simple *rx,
 					    struct net_buf_simple *tx)
 {
@@ -50,6 +59,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	size_t payload_len;
 	uint8_t cmd_code, payload_len_words;
 	uint16_t cmd_data;
+	struct udp_midi_session *session;
 
 	if (rx->len < 4) {
 		LOG_ERR("Incomplete UDP MIDI command packet header");
@@ -84,6 +94,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		net_buf_simple_pull(rx, payload_len_words);
 		net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
 		net_buf_simple_add_le24(tx, 0);
+		session = udp_midi_alloc_session(ep, peer_addr, peer_addr_len);
+		session->state = ESTABLISHED_SESSION;
 		return 0;
 
 	case COMMAND_UMP_DATA:
@@ -122,7 +134,6 @@ static void udp_midi_rx_work(struct k_work *work)
 	struct udp_midi_ep *ep = CONTAINER_OF(work, struct udp_midi_ep, rx_work);
 	struct net_buf_simple *rxbuf = NET_BUF_SIMPLE(BUFSIZE);
 	struct net_buf_simple *txbuf = NET_BUF_SIMPLE(BUFSIZE);
-	struct udp_midi_session *sess;
 
 	net_buf_simple_init(rxbuf, 0);
 	net_buf_simple_init(txbuf, 0);
@@ -148,12 +159,10 @@ static void udp_midi_rx_work(struct k_work *work)
 	net_buf_simple_pull(rxbuf, 4);
 	net_buf_simple_add_mem(txbuf, "MIDI", 4);
 
-	sess = udp_midi_match_session(ep, &peer_addr, peer_addr_len);
-
 	/* Parse contained command packets */
 	while (
 		rxbuf->len >= 4 &&
-		udp_midi_dispatch_command_packet(ep, rxbuf, txbuf) == 0
+		udp_midi_dispatch_command_packet(ep, &peer_addr, peer_addr_len, rxbuf, txbuf) == 0
 	);
 
 	/* Send reply if non empty */
@@ -207,6 +216,7 @@ void udp_midi_send(struct udp_midi_ep *ep, const struct midi_ump ump)
 		if (ep->peers[i].state != ESTABLISHED_SESSION){
 			continue;
 		}
+		LOG_HEXDUMP_DBG(buf, 8+4*UMP_NUM_WORDS(ump), "Send UDP");
 		zsock_sendto(ep->sock, buf, 8+4*UMP_NUM_WORDS(ump), 0,
 			     &ep->peers[i].addr, ep->peers[i].addr_len);
 	}
