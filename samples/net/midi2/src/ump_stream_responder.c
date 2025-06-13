@@ -24,23 +24,23 @@ static inline size_t fill_str(struct midi_ump *ump, size_t offset,
 }
 
 static inline int send_string(const struct ump_stream_responder_cfg *cfg,
+			      const char *string,
 			      uint32_t prefix, size_t offset)
 {
 	struct midi_ump reply;
-	const char *name = cfg->ep_spec->name;
-	size_t namelen = strlen(name);
+	size_t stringlen = strlen(string);
 	size_t strwidth = sizeof(reply) - offset;
 	uint8_t format;
 	size_t i = 0;
 	int res = 0;
 
-	while (i < namelen) {
+	while (i < stringlen) {
 		memset(&reply, 0, sizeof(reply));
 		format = (i == 0)
-			? (namelen - i <= strwidth)
+			? (stringlen - i <= strwidth)
 				? UMP_STREAM_FORMAT_COMPLETE
 				: UMP_STREAM_FORMAT_START
-			: (namelen - i > strwidth)
+			: (stringlen - i > strwidth)
 				? UMP_STREAM_FORMAT_CONTINUE
 				: UMP_STREAM_FORMAT_END;
 
@@ -48,7 +48,7 @@ static inline int send_string(const struct ump_stream_responder_cfg *cfg,
 			      | (format << 26)
 			      | prefix;
 
-		i += fill_str(&reply, offset, &name[i], namelen - i);
+		i += fill_str(&reply, offset, &string[i], stringlen - i);
 		cfg->send(cfg->dev, reply);
 		res++;
 	}
@@ -73,7 +73,8 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 
 	/* Request for Endpoint Name Notification */
 	if (UMP_STREAM_EP_DISCOVERY_FILTER(pkt) & UMP_EP_DISC_FILTER_EP_NAME) {
-		res += send_string(cfg, UMP_STREAM_STATUS_EP_NAME << 16, 2);
+		res += send_string(cfg, cfg->ep_spec->name,
+				   UMP_STREAM_STATUS_EP_NAME << 16, 2);
 	}
 
 	return res;
@@ -101,7 +102,8 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 	}
 
 	if (UMP_STREAM_FB_DISCOVERY_FILTER(pkt) & UMP_FB_DISC_FILTER_NAME) {
-		res += send_string(cfg, (UMP_STREAM_STATUS_FB_NAME << 16) | (block_num << 8), 3);
+		res += send_string(cfg, blk->name,
+				   (UMP_STREAM_STATUS_FB_NAME << 16) | (block_num << 8), 3);
 	}
 
 	return res;
