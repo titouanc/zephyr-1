@@ -86,14 +86,14 @@ struct midi_ump {
  * @param[in]  ump    Universal MIDI Packet
  */
 #define UMP_GROUP(ump) \
-	(((ump).data[0] >> 24) & BITMASK(4))
+	(((ump).data[0] >> 24) & BIT_MASK(4))
 
 /**
  * @brief      Status byte of a MIDI channel voice or system message
  * @param[in]  ump    Universal MIDI Packet (containing a MIDI1 event)
  */
 #define UMP_MIDI_STATUS(ump) \
-	(((ump).data[0] >> 16) & BITMASK(8))
+	(((ump).data[0] >> 16) & BIT_MASK(8))
 /**
  * @brief      Command of a MIDI channel voice message
  * @param[in]  ump    Universal MIDI Packet (containing a MIDI event)
@@ -106,19 +106,19 @@ struct midi_ump {
  * @param[in]  ump    Universal MIDI Packet (containing a MIDI event)
  */
 #define UMP_MIDI_CHANNEL(ump) \
-	(UMP_MIDI_STATUS(ump) & BITMASK(4))
+	(UMP_MIDI_STATUS(ump) & BIT_MASK(4))
 /**
  * @brief      First parameter of a MIDI1 channel voice or system message
  * @param[in]  ump     Universal MIDI Packet (containing a MIDI1 message)
  */
 #define UMP_MIDI1_P1(ump) \
-	(((ump).data[0] >> 8) & BITMASK(7))
+	(((ump).data[0] >> 8) & BIT_MASK(7))
 /**
  * @brief      Second parameter of a MIDI1 channel voice or system message
  * @param[in]  ump     Universal MIDI Packet (containing a MIDI1 message)
  */
 #define UMP_MIDI1_P2(ump) \
-	((ump).data[0] & BITMASK(7))
+	((ump).data[0] & BIT_MASK(7))
 
 /**
  * @brief      Initialize a UMP with a MIDI1 channel voice message
@@ -196,7 +196,7 @@ struct midi_ump {
 /** @} */
 
 #define UMP_STREAM_FORMAT(ump) \
-	(((ump).data[0] >> 26) & BITMASK(2))
+	(((ump).data[0] >> 26) & BIT_MASK(2))
 
 #define UMP_STREAM_FORMAT_COMPLETE 0x00
 #define UMP_STREAM_FORMAT_START    0x01
@@ -210,7 +210,7 @@ struct midi_ump {
  * @{
  */
 #define UMP_STREAM_STATUS(ump) \
-	(((ump).data[0] >> 16) & BITMASK(10))
+	(((ump).data[0] >> 16) & BIT_MASK(10))
 
 #define UMP_STREAM_STATUS_EP_DISCOVERY 0x00
 #define UMP_STREAM_STATUS_EP_INFO      0x01
@@ -231,7 +231,7 @@ struct midi_ump {
  * @{
  */
 #define UMP_STREAM_EP_DISCOVERY_FILTER(ump) \
-	((ump).data[1] & BITMASK(8))
+	((ump).data[1] & BIT_MASK(8))
 
 #define UMP_EP_DISC_FILTER_EP_INFO    BIT(0)
 #define UMP_EP_DISC_FILTER_DEVICE_ID  BIT(1)
@@ -241,9 +241,9 @@ struct midi_ump {
 /** @} */
 
 #define UMP_STREAM_EP_DISCOVERY_VMAJ(ump) \
-	(((ump).data[0] >> 8) & BITMASK(8))
+	(((ump).data[0] >> 8) & BIT_MASK(8))
 #define UMP_STREAM_EP_DISCOVERY_VMIN(ump) \
-	((ump).data[0] & BITMASK(8))
+	((ump).data[0] & BIT_MASK(8))
 
 #define BIT_IF(cond, n) ((cond) ? BIT(n) : 0)
 
@@ -265,7 +265,7 @@ struct midi_ump {
 		| (UMP_STREAM_STATUS_EP_INFO << 16)                    \
 		| ((vmaj) << 8) | (vmin),                            \
 		BIT_IF(sfb, 31)                                        \
-		| (((nfb) & BITMASK(7)) << 24)                                        \
+		| (((nfb) & BIT_MASK(7)) << 24)                                        \
 		| BIT_IF(m2, 9) | BIT_IF(m1, 8)                        \
 		| BIT_IF(rxjr, 1) | BIT_IF(txjr, 0),                   \
 	}}
@@ -277,7 +277,7 @@ struct midi_ump {
  * @{
  */
 #define UMP_STREAM_FB_DISCOVERY_FILTER(ump) \
-	((ump).data[0] & BITMASK(8))
+	((ump).data[0] & BIT_MASK(8))
 
 #define UMP_FB_DISC_FILTER_INFO BIT(0)
 #define UMP_FB_DISC_FILTER_NAME BIT(1)
@@ -288,22 +288,22 @@ struct midi_ump {
 		(UMP_MT_UMP_STREAM << 28)           \
 		| (UMP_STREAM_STATUS_FB_INFO << 16) \
 		| BIT_IF(active, 15)                \
-		| (((n) & BITMASK(7)) << 8)         \
+		| (((n) & BIT_MASK(7)) << 8)         \
 		| BIT_IF(is_out, 5)                 \
 		| BIT_IF(is_in, 4)                  \
-		| (((midi1) & BITMASK(2)) << 2)     \
+		| (((midi1) & BIT_MASK(2)) << 2)     \
 		| BIT_IF(is_out, 1)                 \
-		| BIT_IF(is_in, 0)                  \
-		(((fstgrp) & BITMASK(8)) << 24)     \
-		| (((ngrps) & BITMASK(8)) << 16)    \
-		| (((civers) & BITMASK(8)) << 8)    \
-		| ((nstreams) & BITMASK(8))         \
+		| BIT_IF(is_in, 0),                  \
+		(((fstgrp) & BIT_MASK(8)) << 24)     \
+		| (((ngrps) & BIT_MASK(8)) << 16)    \
+		| (((civers) & BIT_MASK(8)) << 8)    \
+		| ((nstreams) & BIT_MASK(8))         \
 	}}
 
 /** @} */
 
 #define UMP_STREAM_FB_DISCOVERY_NUM(ump) \
-	(((ump).data[0] >> 8) & BITMASK(8))
+	(((ump).data[0] >> 8) & BIT_MASK(8))
 
 #ifdef __cplusplus
 }
