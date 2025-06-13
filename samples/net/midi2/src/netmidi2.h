@@ -46,18 +46,21 @@ enum udp_midi_session_state {
 	PENDING_BYTE,
 };
 
+struct udp_midi_ep;
+
 struct udp_midi_session {
 	enum udp_midi_session_state state;
 	uint16_t tx_ump_seq;
 	uint16_t rx_ump_seq;
 	struct sockaddr addr;
 	socklen_t addr_len;
+	const struct udp_midi_ep *ep;
 };
 
 struct udp_midi_ep {
 	int sock;
 	struct k_work rx_work;
-	void (*rx_packet_cb)(struct udp_midi_ep *ep,
+	void (*rx_packet_cb)(struct udp_midi_session *session,
 			     const struct midi_ump ump);
 	size_t n_peers;
 	struct udp_midi_session *peers;
@@ -66,6 +69,8 @@ struct udp_midi_ep {
 int udp_midi_ep_start(struct udp_midi_ep *ep,
 		      const struct sockaddr *addr, socklen_t addr_len);
 
-void udp_midi_send(struct udp_midi_ep *ep, const struct midi_ump ump);
+void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump);
+
+void udp_midi_send(struct udp_midi_session *sess, const struct midi_ump ump);
 
 #endif
