@@ -11,7 +11,6 @@ static inline size_t fill_str(struct midi_ump *ump, size_t offset,
 			      const char *src, size_t len)
 {
 	size_t i, j;
-	uint32_t *word;
 
 	if (offset >= sizeof(struct midi_ump)) {
 		return 0;
@@ -36,7 +35,7 @@ static inline int send_string(const struct ump_stream_responder_cfg *cfg,
 	int res = 0;
 
 	while (i < namelen) {
-		memset(reply, 0, sizeof(reply));
+		memset(&reply, 0, sizeof(reply));
 		format = (i == 0)
 			? (namelen - i <= strwidth)
 				? UMP_STREAM_FORMAT_COMPLETE
@@ -80,17 +79,18 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 	return res;
 }
 
-static inline int ump_fb_discover(struct rpmsg_endpoint *ept, const struct midi_ump pkt)
+static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
+				  const struct midi_ump pkt)
 {
 	int res = 0;
 	uint8_t block_num = UMP_STREAM_FB_DISCOVERY_NUM(pkt);
 
-	if (block_num >= dt_ump_ep.n_blocks) {
+	if (block_num >= cfg->ep_spec->n_blocks) {
 		LOG_WRN("Function block discovery block=%d does not exist", block_num);
 		return 0;
 	}
 
-	const struct ump_block_dt_spec *blk = &dt_ump_ep.blocks[block_num];
+	const struct ump_block_dt_spec *blk = &cfg->ep_spec->blocks[block_num];
 
 	LOG_INF("Function block discovery block=%d filter=%02X", block_num,
 		UMP_STREAM_FB_DISCOVERY_FILTER(pkt));
@@ -114,7 +114,7 @@ int ump_stream_responder(const struct ump_stream_responder_cfg *cfg,
 		return -EINVAL;
 	}
 
-	if (UMP_MT(pkt) != UMP_MT_STREAM) {
+	if (UMP_MT(pkt) != UMP_MT_UMP_STREAM) {
 		return 0;
 	}
 
@@ -124,4 +124,6 @@ int ump_stream_responder(const struct ump_stream_responder_cfg *cfg,
 	case UMP_STREAM_STATUS_FB_DISCOVERY:
 		return ump_fb_discover(cfg, pkt);
 	}
+
+	return 0;
 }

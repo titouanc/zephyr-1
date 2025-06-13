@@ -12,23 +12,33 @@
 #include <zephyr/audio/midi.h>
 
 #include "netmidi2.h"
+#include "ump_stream_responder.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
 
 #define MY_PORT 5673
 
+UDP_MIDI_EP_DECLARE(midi_server, 10);
+
+static const struct ump_endpoint_dt_spec ump_ep = UMP_ENDPOINT_DT_SPEC_GET(DT_NODELABEL(midi2));
+
+static const struct ump_stream_responder_cfg responder_cfg = {
+	.dev = &midi_server,
+	.send = (void (*)(void *, const struct midi_ump)) udp_midi_send,
+	.ep_spec = &ump_ep,
+};
+
 static void netmidi2_callback(struct udp_midi_ep *ep, const struct midi_ump ump)
 {
 	LOG_INF("[%p] Rx MIDI MT=%02X", ep, UMP_MT(ump));
-	udp_midi_send(ep, ump);
+	if (UMP_MT(ump) == UMP_MT_UMP_STREAM) {
+		ump_stream_responder(&responder_cfg, ump);
+	}
 }
-
-UDP_MIDI_EP_DECLARE(midi_server, 10);
 
 int main(void)
 {
-	int ret;
 	struct sockaddr_in addr4;
 
 	memset(&addr4, 0, sizeof(addr4));
