@@ -55,6 +55,8 @@ struct udp_midi_session {
 	struct sockaddr addr;
 	socklen_t addr_len;
 	const struct udp_midi_ep *ep;
+	struct k_work tx_work;
+	struct net_buf *tx_buf;
 };
 
 struct udp_midi_ep {

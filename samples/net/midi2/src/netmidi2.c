@@ -1,13 +1,29 @@
 #include "netmidi2.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
 
 #define BUFSIZE 256
 
-static inline void udp_midi_session_free(struct udp_midi_session *session)
+NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
+
+#define SESS_LOG(_lvl, _s, _fmt, ...) \
+	{ \
+		const struct sockaddr_in *__pa = (const struct sockaddr_in *) &(_s)->addr; \
+		char __pn[INET_ADDRSTRLEN]; \
+		net_addr_ntop(AF_INET, &__pa->sin_addr, __pn, INET_ADDRSTRLEN); \
+		LOG_##_lvl("%s:%d " _fmt, __pn, __pa->sin_port, ##__VA_ARGS__); \
+	}
+
+static inline void udp_midi_free_session(struct udp_midi_session *session)
 {
-	memset(session, 0, sizeof(struct udp_midi_session));
+	SESS_LOG(INF, session, "Free client session");
+
+	k_work_cancel(&session->tx_work);
+	if (session->tx_buf) {
+		net_buf_unref(session->tx_buf);
+	}
+	memset(session, 0, sizeof(*session) - sizeof(struct k_work));
 }
 
 static inline struct udp_midi_session *udp_midi_match_session(
@@ -44,7 +60,7 @@ static inline struct udp_midi_session *udp_midi_alloc_session(
 			sess->addr_len = peer_addr_len;
 			sess->ep = ep;
 			memcpy(&sess->addr, peer_addr, peer_addr_len);
-			LOG_DBG("Allocated new client session %d", i);
+			SESS_LOG(INF, sess, "new client session (%d)", i);
 			return sess;
 		}
 	}
@@ -95,22 +111,32 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 
 	case COMMAND_INVITATION:
 		/* Peer EP name & product instance ID */
-		net_buf_simple_pull(rx, payload_len_words);
+		net_buf_simple_pull(rx, payload_len);
 		net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
 		net_buf_simple_add_le24(tx, 0);
 		session = udp_midi_alloc_session(ep, peer_addr, peer_addr_len);
 		session->state = ESTABLISHED_SESSION;
 		return 0;
 
+	case COMMAND_BYE:
+		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
+		if (! session) {
+			LOG_WRN("Receiving BYE for without active session");
+			return -1;
+		}
+		net_buf_simple_pull(rx, payload_len);
+		udp_midi_free_session(session);
+		return 0;
+
 	case COMMAND_UMP_DATA:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
 		if (! session) {
-			LOG_WRN("Receiving UMP data without an active session");
+			LOG_WRN("Receiving UMP data without active session");
 			return -1;
 		}
 
 		if (payload_len_words < 1 || payload_len_words > 4) {
-			LOG_ERR("Invalid UMP length");
+			SESS_LOG(ERR, session, "Invalid UMP length");
 			return -1;
 		}
 
@@ -119,7 +145,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		if (UMP_NUM_WORDS(ump) != payload_len_words) {
-			LOG_ERR("Invalid UMP payload size for its message type");
+			SESS_LOG(ERR, session, "Invalid UMP payload size for its message type");
 			return -1;
 		}
 
@@ -188,6 +214,17 @@ static void udp_midi_rx_work(struct k_work *work)
 		k_work_submit(&ep->rx_work);
 }
 
+static void udp_midi_session_tx_work(struct k_work *work)
+{
+	struct udp_midi_session *session = CONTAINER_OF(work, struct udp_midi_session, tx_work);
+	struct net_buf *buf = session->tx_buf;
+	session->tx_buf = NULL;
+
+	zsock_sendto(session->ep->sock, buf->data, buf->len, 0,
+		     &session->addr, session->addr_len);
+	net_buf_unref(buf);
+}
+
 int udp_midi_ep_start(struct udp_midi_ep *ep,
 		      const struct sockaddr *addr, socklen_t addr_len)
 {
@@ -209,46 +246,40 @@ int udp_midi_ep_start(struct udp_midi_ep *ep,
 	k_work_init(&ep->rx_work, udp_midi_rx_work);
 	k_work_submit(&ep->rx_work);
 
+	for (size_t i=0; i<ep->n_peers; i++) {
+		k_work_init(&ep->peers[i].tx_work, udp_midi_session_tx_work);
+	}
+
 	return ret;
 }
 
 void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump)
 {
-	uint8_t buf[8 + sizeof(ump)] = "MIDI";
-	buf[4] = COMMAND_UMP_DATA;
-	buf[5] = UMP_NUM_WORDS(ump);
-	uint32_t *buf32 = (uint32_t *) &buf[8];
-	for (size_t i=0; i<UMP_NUM_WORDS(ump); i++) {
-		buf32[i] = sys_cpu_to_be32(ump.data[i]);
-	}
-
 	for (size_t i=0; i<ep->n_peers; i++) {
-		if (ep->peers[i].state != ESTABLISHED_SESSION){
-			continue;
+		if (ep->peers[i].state == ESTABLISHED_SESSION){
+			udp_midi_send(&ep->peers[i], ump);
 		}
-		LOG_HEXDUMP_DBG(buf, 8+4*UMP_NUM_WORDS(ump), "Send UDP");
-		zsock_sendto(ep->sock, buf, 8+4*UMP_NUM_WORDS(ump), 0,
-			     &ep->peers[i].addr, ep->peers[i].addr_len);
 	}
 }
 
 void udp_midi_send(struct udp_midi_session *sess, const struct midi_ump ump)
 {
-	uint8_t buf[8 + sizeof(ump)] = "MIDI";
-	uint32_t *buf32 = (uint32_t *) &buf[8];
+	if (! sess->tx_buf){
+		sess->tx_buf = net_buf_alloc(&udp_midi_pool, K_FOREVER);
+		net_buf_add_be32(sess->tx_buf, 0x4d494449);
+	}
 
-	if (sess->state != ESTABLISHED_SESSION){
-		LOG_WRN("Attempting to send data on an un-established session");
+	if (net_buf_tailroom(sess->tx_buf) < 4*(1 + UMP_NUM_WORDS(ump))) {
+		LOG_WRN("Not enough room in Tx buffer");
 		return;
 	}
 
-	buf[4] = COMMAND_UMP_DATA;
-	buf[5] = UMP_NUM_WORDS(ump);
-	for (size_t i=0; i<UMP_NUM_WORDS(ump); i++) {
-		buf32[i] = sys_cpu_to_be32(ump.data[i]);
-	}
+	net_buf_add_u8(sess->tx_buf, COMMAND_UMP_DATA);
+	net_buf_add_u8(sess->tx_buf, UMP_NUM_WORDS(ump));
+	net_buf_add_be16(sess->tx_buf, sess->tx_ump_seq++);
 
-	LOG_HEXDUMP_DBG(buf, 8+4*UMP_NUM_WORDS(ump), "Send UDP");
-	zsock_sendto(sess->ep->sock, buf, 8+4*UMP_NUM_WORDS(ump), 0,
-		     &sess->addr, sess->addr_len);
+	for (size_t i=0; i<UMP_NUM_WORDS(ump); i++){
+		net_buf_add_be32(sess->tx_buf, ump.data[i]);
+	}
+	k_work_submit(&sess->tx_work);
 }
