@@ -21,7 +21,8 @@ LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
 
 UDP_MIDI_EP_DECLARE(midi_server, 10);
 
-static const struct ump_endpoint_dt_spec ump_ep = UMP_ENDPOINT_DT_SPEC_GET(DT_NODELABEL(midi2));
+static const struct ump_endpoint_dt_spec ump_ep =
+	UMP_ENDPOINT_DT_SPEC_GET(DT_NODELABEL(midi2));
 
 static void netmidi2_callback(struct udp_midi_session *session,
 			      const struct midi_ump ump)
