@@ -10,8 +10,6 @@
 
 #include <zephyr/net/socket.h>
 #include <zephyr/audio/midi.h>
-#include <zephyr/drivers/uart.h>
-#include <zephyr/drivers/gpio.h>
 
 #include "netmidi2.h"
 #include "ump_stream_responder.h"
@@ -21,13 +19,20 @@ LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
 
 #define MY_PORT 5673
 
-UDP_MIDI_EP_DECLARE(midi_server, 10);
+#if ! DT_HAS_CHOSEN(midi_tx_uart)
+static inline void send_midi1(...) {}
+#else
+#include <zephyr/drivers/uart.h>
 
 static const struct device *const uart_dev =
-	DEVICE_DT_GET(DT_NODELABEL(arduino_serial));
+	DEVICE_DT_GET(DT_CHOSEN(midi_tx_uart));
+
+#if DT_HAS_CHOSEN(midi_tx_led)
+#include <zephyr/drivers/gpio.h>
 
 static const struct gpio_dt_spec act_led =
-	GPIO_DT_SPEC_GET(DT_NODELABEL(activity_led), gpios);
+	GPIO_DT_SPEC_GET_OR(DT_CHOSEN(midi_tx_led), gpios, {0});
+#endif  /* DT_HAS_CHOSEN(midi_tx_led) */
 
 static inline void send_midi1(const struct midi_ump ump)
 {
@@ -37,14 +42,22 @@ static inline void send_midi1(const struct midi_ump ump)
 	case UMP_MIDI_AFTERTOUCH:
 	case UMP_MIDI_CONTROL_CHANGE:
 	case UMP_MIDI_PITCH_BEND:
+
+#if DT_HAS_CHOSEN(midi_tx_led)
 		gpio_pin_set_dt(&act_led, 1);
+#endif /* DT_HAS_CHOSEN(midi_tx_led) */
+
 		uart_poll_out(uart_dev, UMP_MIDI_STATUS(ump));
 		uart_poll_out(uart_dev, UMP_MIDI1_P1(ump));
 		uart_poll_out(uart_dev, UMP_MIDI1_P2(ump));
+
+#if DT_HAS_CHOSEN(midi_tx_led)
 		gpio_pin_set_dt(&act_led, 0);
-		break;
+#endif /* DT_HAS_CHOSEN(midi_tx_led) */
+
 	}
 }
+#endif /* DT_HAS_CHOSEN(midi_tx_uart) */
 
 static const struct ump_endpoint_dt_spec ump_ep_dt =
 	UMP_ENDPOINT_DT_SPEC_GET(DT_NODELABEL(midi2));
@@ -73,17 +86,22 @@ static void netmidi2_callback(struct udp_midi_session *session,
 	}
 }
 
+UDP_MIDI_EP_DECLARE(midi_server, 10);
+
 int main(void)
 {
 	struct sockaddr_in addr4;
 
+#if DT_HAS_CHOSEN(midi_tx_led)
 	gpio_pin_configure_dt(&act_led, GPIO_OUTPUT_INACTIVE);
+#endif /* DT_HAS_CHOSEN(midi_tx_led) */
 
 	memset(&addr4, 0, sizeof(addr4));
 	addr4.sin_family = AF_INET;
 	addr4.sin_port = htons(MY_PORT);
 
 	midi_server.rx_packet_cb = netmidi2_callback;
+	midi_server.shared_auth_secret = "5483";
 	udp_midi_ep_start(&midi_server, (const struct sockaddr *) &addr4, sizeof(addr4));
 
 	return 0;

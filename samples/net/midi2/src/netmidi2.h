@@ -48,6 +48,8 @@ enum udp_midi_session_state {
 
 struct udp_midi_ep;
 
+#define UDP_MIDI_NONCE_SIZE 16
+
 struct udp_midi_session {
 	enum udp_midi_session_state state;
 	uint16_t tx_ump_seq;
@@ -57,6 +59,7 @@ struct udp_midi_session {
 	const struct udp_midi_ep *ep;
 	struct k_work tx_work;
 	struct net_buf *tx_buf;
+	char nonce[UDP_MIDI_NONCE_SIZE];
 };
 
 struct udp_midi_ep {
@@ -66,13 +69,24 @@ struct udp_midi_ep {
 			     const struct midi_ump ump);
 	size_t n_peers;
 	struct udp_midi_session *peers;
+	const char *shared_auth_secret;
 };
 
 int udp_midi_ep_start(struct udp_midi_ep *ep,
 		      const struct sockaddr *addr, socklen_t addr_len);
 
+/**
+ * @brief      Send a Universal MIDI Packet to all clients connected to the endpoint
+ * @param      ep    The endpoint
+ * @param[in]  ump   The packet to send
+ */
 void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump);
 
+/**
+ * @brief      Send a Universal MIDI Packet to a single client
+ * @param      sess  The session identifying the single client
+ * @param[in]  ump   The packet to send
+ */
 void udp_midi_send(struct udp_midi_session *sess, const struct midi_ump ump);
 
 #endif
