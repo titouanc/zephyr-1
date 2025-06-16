@@ -1,11 +1,18 @@
 #include "netmidi2.h"
 
+#include <zephyr/crypto/crypto.h>
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
 
 #define BUFSIZE 256
 
 NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
+
+#define SESS_LOG_DBG(_s, _fmt, ...) SESS_LOG(DBG, _s, _fmt, ##__VA_ARGS__)
+#define SESS_LOG_INF(_s, _fmt, ...) SESS_LOG(INF, _s, _fmt, ##__VA_ARGS__)
+#define SESS_LOG_WRN(_s, _fmt, ...) SESS_LOG(WRN, _s, _fmt, ##__VA_ARGS__)
+#define SESS_LOG_ERR(_s, _fmt, ...) SESS_LOG(ERR, _s, _fmt, ##__VA_ARGS__)
 
 #define SESS_LOG(_lvl, _s, _fmt, ...) \
 	{ \
@@ -17,7 +24,7 @@ NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
 
 static inline void udp_midi_free_session(struct udp_midi_session *session)
 {
-	SESS_LOG(INF, session, "Free client session");
+	SESS_LOG_INF(session, "Free client session");
 
 	k_work_cancel(&session->tx_work);
 	if (session->tx_buf) {
@@ -60,13 +67,46 @@ static inline struct udp_midi_session *udp_midi_alloc_session(
 			sess->addr_len = peer_addr_len;
 			sess->ep = ep;
 			memcpy(&sess->addr, peer_addr, peer_addr_len);
-			SESS_LOG(INF, sess, "new client session (%d)", i);
+			SESS_LOG_INF(sess, "new client session (%d)", i);
 			return sess;
 		}
 	}
 
 	LOG_ERR("Not any free slot for a new client session");
 	return NULL;
+}
+
+static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
+					 const uint8_t digest[32])
+{
+	const struct device *hasher = device_get_binding(CONFIG_CRYPTO_MBEDTLS_SHIM_DRV_NAME);
+	struct hash_ctx ctx = {.flags = crypto_query_hwcaps(hasher)};
+	uint8_t input[32];
+	uint8_t output[32];
+	size_t secret_len = strlen(sess->ep->shared_auth_secret);
+	struct hash_pkt hash = {
+		.in_buf = input,
+		.in_len = UDP_MIDI_NONCE_SIZE + secret_len,
+		.out_buf = output,
+	};
+
+	if (! hasher) {
+		LOG_ERR("mbedtls crypto pseudo-device unavailable");
+		return false;
+	}
+
+	memcpy(input, sess->nonce, UDP_MIDI_NONCE_SIZE);
+	memcpy(&input[UDP_MIDI_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
+
+	hash_begin_session(hasher, &ctx, CRYPTO_HASH_ALGO_SHA256);
+
+	if (hash_compute(&ctx, &hash)) {
+		SESS_LOG_ERR(sess, "Hashing error");
+		return false;
+	}
+	hash_free_session(hasher, &ctx);
+
+	return memcmp(hash.out_buf, digest, 32) == 0;
 }
 
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
@@ -110,11 +150,49 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		return 0;
 
 	case COMMAND_INVITATION:
-		/* Peer EP name & product instance ID */
 		net_buf_simple_pull(rx, payload_len);
-		net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
-		net_buf_simple_add_le24(tx, 0);
+
 		session = udp_midi_alloc_session(ep, peer_addr, peer_addr_len);
+		if (! session) {
+			return -1;
+		}
+
+		if (ep->shared_auth_secret) {
+			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_AUTH_REQUIRED);
+			net_buf_simple_add_u8(tx, 4);
+			net_buf_simple_add_be16(tx, 0);
+			memcpy(session->nonce, "nUWrn*@#$hjfwnkL", UDP_MIDI_NONCE_SIZE);
+			net_buf_simple_add_mem(tx, session->nonce, UDP_MIDI_NONCE_SIZE);
+			session->state = AUTHENTICATION_REQUIRED;
+		} else {
+			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
+			net_buf_simple_add_be24(tx, 0);
+			session->state = ESTABLISHED_SESSION;
+		}
+
+		return 0;
+
+	case COMMAND_INVITATION_WITH_AUTH:
+		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
+		if (! session) {
+			LOG_WRN("No session to authenticate found");
+			return -1;
+		}
+
+		if (payload_len_words != 8) {
+			SESS_LOG_WRN(session, "Invalid auth digest length");
+			return -1;
+		}
+
+		if (! udp_midi_auth_session(session, rx->data)) {
+			SESS_LOG_WRN(session, "Invalid auth digest");
+			return -1;
+		}
+
+		net_buf_simple_pull(rx, 32);
+
+		net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
+		net_buf_simple_add_be24(tx, 0);
 		session->state = ESTABLISHED_SESSION;
 		return 0;
 
@@ -136,7 +214,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		if (payload_len_words < 1 || payload_len_words > 4) {
-			SESS_LOG(ERR, session, "Invalid UMP length");
+			SESS_LOG_ERR(session, "Invalid UMP length");
 			return -1;
 		}
 
@@ -145,7 +223,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		if (UMP_NUM_WORDS(ump) != payload_len_words) {
-			SESS_LOG(ERR, session, "Invalid UMP payload size for its message type");
+			SESS_LOG_ERR(session, "Invalid UMP payload size for its message type");
 			return -1;
 		}
 
@@ -157,6 +235,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	default:
 		LOG_WRN("Unknown command code %02X", cmd_code);
 		net_buf_simple_pull(rx, payload_len);
+		// TODO: send NAK "Command not supported"
 		return 0;
 	}
 	return 0;
