@@ -50,6 +50,16 @@ struct udp_midi_ep;
 
 #define UDP_MIDI_NONCE_SIZE 16
 
+struct udp_midi_user {
+	const char *name;
+	const char *password;
+};
+
+struct udp_midi_userlist {
+	size_t n_users;
+	const struct udp_midi_user users[];
+};
+
 struct udp_midi_session {
 	enum udp_midi_session_state state;
 	uint16_t tx_ump_seq;
@@ -57,9 +67,16 @@ struct udp_midi_session {
 	struct sockaddr addr;
 	socklen_t addr_len;
 	const struct udp_midi_ep *ep;
-	struct k_work tx_work;
-	struct net_buf *tx_buf;
+	const struct udp_midi_user *user;
 	char nonce[UDP_MIDI_NONCE_SIZE];
+	struct net_buf *tx_buf;
+	struct k_work tx_work;
+};
+
+enum udp_midi_auth_type {
+	UDP_MIDI_NO_AUTH,
+	UDP_MIDI_SHARED_SECRET,
+	UDP_MIDI_USER_PASSWORD,
 };
 
 struct udp_midi_ep {
@@ -69,7 +86,11 @@ struct udp_midi_ep {
 			     const struct midi_ump ump);
 	size_t n_peers;
 	struct udp_midi_session *peers;
-	const char *shared_auth_secret;
+	enum udp_midi_auth_type auth_type;
+	union {
+		const char *shared_auth_secret;
+		const struct udp_midi_userlist *userlist;
+	};
 };
 
 int udp_midi_ep_start(struct udp_midi_ep *ep,
