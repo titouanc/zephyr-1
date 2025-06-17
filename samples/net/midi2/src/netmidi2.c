@@ -1,5 +1,6 @@
 #include "netmidi2.h"
 
+#include <stdio.h>
 #include <zephyr/crypto/crypto.h>
 
 #include <zephyr/logging/log.h>
@@ -21,6 +22,15 @@ NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
 		net_addr_ntop(AF_INET, &__pa->sin_addr, __pn, INET_ADDRSTRLEN); \
 		LOG_##_lvl("%s:%d " _fmt, __pn, __pa->sin_port, ##__VA_ARGS__); \
 	}
+
+static inline bool udp_midi_session_has_state(struct udp_midi_session *session,
+					      enum udp_midi_session_state state)
+{
+	if (! session) {
+		return false;
+	}
+	return session->state == state;
+}
 
 static inline void udp_midi_free_session(struct udp_midi_session *session)
 {
@@ -76,19 +86,41 @@ static inline struct udp_midi_session *udp_midi_alloc_session(
 	return NULL;
 }
 
+static inline const struct udp_midi_user *udp_midi_find_user(
+	const struct udp_midi_ep *ep, const char *name, size_t namelen
+)
+{
+	if (ep->auth_type != UDP_MIDI_USER_PASSWORD) {
+		return NULL;
+	}
+
+	for (size_t i=0; i<ep->userlist->n_users; i++) {
+		if (strncmp(ep->userlist->users[i].name, name, namelen) == 0) {
+			return &ep->userlist->users[i];
+		}
+	}
+
+	return NULL;
+}
+
 static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
-					 const uint8_t digest[32])
+					 struct net_buf_simple *buf)
 {
 	const struct device *hasher = device_get_binding(CONFIG_CRYPTO_MBEDTLS_SHIM_DRV_NAME);
 	struct hash_ctx ctx = {.flags = crypto_query_hwcaps(hasher)};
-	uint8_t input[32];
+	const uint8_t *auth_digest = buf->data;
+	const struct udp_midi_user *user;
+	uint8_t input[64];
 	uint8_t output[32];
 	size_t secret_len = strlen(sess->ep->shared_auth_secret);
 	struct hash_pkt hash = {
 		.in_buf = input,
-		.in_len = UDP_MIDI_NONCE_SIZE + secret_len,
+		.in_len = UDP_MIDI_NONCE_SIZE,
 		.out_buf = output,
 	};
+
+	/* Remove digest from buffer */
+	net_buf_simple_pull(buf, 32);
 
 	if (! hasher) {
 		LOG_ERR("mbedtls crypto pseudo-device unavailable");
@@ -96,7 +128,22 @@ static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
 	}
 
 	memcpy(input, sess->nonce, UDP_MIDI_NONCE_SIZE);
-	memcpy(&input[UDP_MIDI_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
+
+	if (sess->ep->auth_type == UDP_MIDI_SHARED_SECRET) {
+		memcpy(&input[UDP_MIDI_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
+		hash.in_len += secret_len;
+	} else if (sess->ep->auth_type == UDP_MIDI_USER_PASSWORD) {
+		user = udp_midi_find_user(sess->ep, buf->data, buf->len);
+		if (! user) {
+			LOG_ERR("No matching user found");
+			return false;
+		}
+		hash.in_len += snprintf(&input[UDP_MIDI_NONCE_SIZE],
+					sizeof(input) - UDP_MIDI_NONCE_SIZE,
+					"%s%s", user->name, user->password);
+		/* Remove username from buffer */
+		net_buf_simple_pull(buf, ROUND_UP(strlen(user->name), 4));
+	}
 
 	hash_begin_session(hasher, &ctx, CRYPTO_HASH_ALGO_SHA256);
 
@@ -104,9 +151,10 @@ static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
 		SESS_LOG_ERR(sess, "Hashing error");
 		return false;
 	}
+
 	hash_free_session(hasher, &ctx);
 
-	return memcmp(hash.out_buf, digest, 32) == 0;
+	return memcmp(hash.out_buf, auth_digest, 32) == 0;
 }
 
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
@@ -157,39 +205,40 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			return -1;
 		}
 
-		if (ep->shared_auth_secret) {
-			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_AUTH_REQUIRED);
+		if (ep->auth_type == UDP_MIDI_NO_AUTH) {
+			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
+			net_buf_simple_add_be24(tx, 0);
+			session->state = ESTABLISHED_SESSION;
+		} else {
+			net_buf_simple_add_u8(tx, ep->auth_type == UDP_MIDI_SHARED_SECRET
+						  ? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
+						  : COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED);
 			net_buf_simple_add_u8(tx, 4);
 			net_buf_simple_add_be16(tx, 0);
 			memcpy(session->nonce, "nUWrn*@#$hjfwnkL", UDP_MIDI_NONCE_SIZE);
 			net_buf_simple_add_mem(tx, session->nonce, UDP_MIDI_NONCE_SIZE);
 			session->state = AUTHENTICATION_REQUIRED;
-		} else {
-			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
-			net_buf_simple_add_be24(tx, 0);
-			session->state = ESTABLISHED_SESSION;
 		}
 
 		return 0;
 
 	case COMMAND_INVITATION_WITH_AUTH:
+	case COMMAND_INVITATION_WITH_USER_AUTH:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
-		if (! session) {
+		if (! udp_midi_session_has_state(session, AUTHENTICATION_REQUIRED)) {
 			LOG_WRN("No session to authenticate found");
 			return -1;
 		}
 
-		if (payload_len_words != 8) {
+		if (payload_len_words < 8) {
 			SESS_LOG_WRN(session, "Invalid auth digest length");
 			return -1;
 		}
 
-		if (! udp_midi_auth_session(session, rx->data)) {
+		if (! udp_midi_auth_session(session, rx)) {
 			SESS_LOG_WRN(session, "Invalid auth digest");
 			return -1;
 		}
-
-		net_buf_simple_pull(rx, 32);
 
 		net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
 		net_buf_simple_add_be24(tx, 0);
@@ -199,7 +248,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	case COMMAND_BYE:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
 		if (! session) {
-			LOG_WRN("Receiving BYE for without active session");
+			LOG_WRN("Receiving BYE without session");
 			return -1;
 		}
 		net_buf_simple_pull(rx, payload_len);
@@ -208,8 +257,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 
 	case COMMAND_UMP_DATA:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
-		if (! session) {
-			LOG_WRN("Receiving UMP data without active session");
+		if (! udp_midi_session_has_state(session, ESTABLISHED_SESSION)) {
+			LOG_WRN("Receiving UMP data without established session");
 			return -1;
 		}
 
