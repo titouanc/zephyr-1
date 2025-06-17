@@ -86,6 +86,13 @@ static void netmidi2_callback(struct udp_midi_session *session,
 	}
 }
 
+static const struct udp_midi_userlist authorized_users = {
+	.n_users=1,
+	.users={
+		{.name="Titou", .password="Coucou"}
+	},
+};
+
 UDP_MIDI_EP_DECLARE(midi_server, 10);
 
 int main(void)
@@ -101,7 +108,8 @@ int main(void)
 	addr4.sin_port = htons(MY_PORT);
 
 	midi_server.rx_packet_cb = netmidi2_callback;
-	midi_server.shared_auth_secret = "5483";
+	midi_server.auth_type = UDP_MIDI_USER_PASSWORD;
+	midi_server.userlist = &authorized_users;
 	udp_midi_ep_start(&midi_server, (const struct sockaddr *) &addr4, sizeof(addr4));
 
 	return 0;
