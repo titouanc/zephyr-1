@@ -8,8 +8,9 @@
 #include <errno.h>
 #include <stdio.h>
 
-#include <zephyr/net/socket.h>
 #include <zephyr/audio/midi.h>
+#include <zephyr/net/dns_sd.h>
+#include <zephyr/net/socket.h>
 
 #include "netmidi2.h"
 #include "ump_stream_responder.h"
@@ -94,6 +95,9 @@ static const struct udp_midi_userlist authorized_users = {
 };
 
 UDP_MIDI_EP_DECLARE(midi_server, 10);
+
+DNS_SD_REGISTER_UDP_SERVICE(midi_dns, CONFIG_NET_HOSTNAME, "_midi2", "local",
+			    DNS_SD_EMPTY_TXT, MY_PORT);
 
 int main(void)
 {
