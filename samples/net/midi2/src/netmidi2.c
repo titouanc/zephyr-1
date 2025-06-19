@@ -62,7 +62,29 @@ static inline struct udp_midi_session *udp_midi_match_session(
 	return NULL;
 }
 
-static inline struct udp_midi_session *udp_midi_alloc_session(
+static inline void udp_midi_free_inactive_sessions(struct udp_midi_ep *ep)
+{
+	struct udp_midi_session *sess;
+	const uint8_t bye_timeout[] = {COMMAND_BYE, 0, 0x04, 0};
+
+	for (size_t i=0; i<ep->n_peers; i++) {
+		sess = &ep->peers[i];
+		switch (sess->state) {
+		case IDLE:
+		case PENDING_INVITATION:
+		case AUTHENTICATION_REQUIRED:
+		case PENDING_BYE:
+			SESS_LOG_WRN(sess, "Cleanup inactive session");
+			zsock_sendto(ep->sock, bye_timeout, sizeof(bye_timeout),
+				     0, &sess->addr, sess->addr_len);
+			udp_midi_free_session(sess);
+		default:
+			continue;
+		}
+	}
+}
+
+static inline struct udp_midi_session *udp_midi_try_alloc_session(
 	struct udp_midi_ep *ep,
 	struct sockaddr *peer_addr,
 	socklen_t peer_addr_len
@@ -82,8 +104,26 @@ static inline struct udp_midi_session *udp_midi_alloc_session(
 		}
 	}
 
-	LOG_ERR("Not any free slot for a new client session");
 	return NULL;
+}
+
+static inline struct udp_midi_session *udp_midi_alloc_session(
+	struct udp_midi_ep *ep,
+	struct sockaddr *peer_addr,
+	socklen_t peer_addr_len
+)
+{
+	struct udp_midi_session *res = udp_midi_try_alloc_session(ep, peer_addr, peer_addr_len);
+	if (! res) {
+		udp_midi_free_inactive_sessions(ep);
+		res = udp_midi_try_alloc_session(ep, peer_addr, peer_addr_len);
+	}
+
+	if (! res) {
+		LOG_ERR("No available client session");
+	}
+
+	return res;
 }
 
 static inline const struct udp_midi_user *udp_midi_find_user(
@@ -252,6 +292,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			return -1;
 		}
 		net_buf_simple_pull(rx, payload_len);
+		net_buf_simple_add_u8(tx, COMMAND_BYE_REPLY);
+		net_buf_simple_add_be24(tx, 0);
 		udp_midi_free_session(session);
 		return 0;
 
@@ -260,6 +302,14 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		if (! udp_midi_session_has_state(session, ESTABLISHED_SESSION)) {
 			LOG_WRN("Receiving UMP data without established session");
 			return -1;
+		}
+
+		if (session->rx_ump_seq == cmd_data) {
+			session->rx_ump_seq++;
+		} else {
+			SESS_LOG_WRN(session, "UMP Rx sequence mismatch (got %d, expected %d)",
+				     cmd_data, session->rx_ump_seq);
+			session->rx_ump_seq = 1 + cmd_data;
 		}
 
 		if (payload_len_words < 1 || payload_len_words > 4) {
@@ -279,6 +329,20 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		if (ep->rx_packet_cb){
 			ep->rx_packet_cb(session, ump);
 		}
+		return 0;
+
+	case COMMAND_SESSION_RESET:
+		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
+		if (! udp_midi_session_has_state(session, ESTABLISHED_SESSION)) {
+			LOG_WRN("Receiving session reset without established session");
+			return -1;
+		}
+
+		session->tx_ump_seq = 0;
+		session->rx_ump_seq = 0;
+		SESS_LOG_INF(session, "Reset session");
+		net_buf_simple_add_u8(tx, COMMAND_SESSION_RESET_REPLY);
+		net_buf_simple_add_be24(tx, 0);
 		return 0;
 
 	default:
