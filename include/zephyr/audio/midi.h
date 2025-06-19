@@ -245,31 +245,6 @@ struct midi_ump {
 #define UMP_STREAM_EP_DISCOVERY_VMIN(ump) \
 	((ump).data[0] & BIT_MASK(8))
 
-#define BIT_IF(cond, n) ((cond) ? BIT(n) : 0)
-
-/**
- * @brief      Initialize a UMP with a UMP Stream Endpoint Notification message
- * @param      vmaj   Major Version of the UMP protocol
- * @param      vmin   Minor Version of the UMP protocol
- * @param      sfb    True for static function blocks (not reconfigurable)
- * @param      nfb    Number of function blocks in this endpoint
- * @param      m2     True if the endpoint supports MIDI2.0 protocol
- * @param      m1     True if the endpoint supports MIDI1.0 protocol
- * @param      rxjr   True if the endpoint supports receiving JR timestamps
- * @param      txjr   True if the endpoint supports sending JR timestamps
- * @see ump112 7.1.2: Endpoint Info Notification Message
- */
-#define UMP_STREAM_EP_INFO(vmaj, vmin, sfb, nfb, m2, m1, rxjr, txjr) \
-	(struct midi_ump) {.data = {                                   \
-		(UMP_MT_UMP_STREAM << 28)                              \
-		| (UMP_STREAM_STATUS_EP_INFO << 16)                    \
-		| ((vmaj) << 8) | (vmin),                            \
-		BIT_IF(sfb, 31)                                        \
-		| (((nfb) & BIT_MASK(7)) << 24)                                        \
-		| BIT_IF(m2, 9) | BIT_IF(m1, 8)                        \
-		| BIT_IF(rxjr, 1) | BIT_IF(txjr, 0),                   \
-	}}
-
 /**
  * @defgroup midi_ump_ep_disc UMP Stream function block discovery message filter bits
  * @ingroup midi_ump
@@ -283,27 +258,10 @@ struct midi_ump {
 #define UMP_FB_DISC_FILTER_NAME BIT(1)
 /** @} */
 
-#define UMP_STREAM_FB_INFO(active, n, midi1, is_in, is_out, fstgrp, ngrps, civers, nstreams) \
-	(struct midi_ump) {.data = {                \
-		(UMP_MT_UMP_STREAM << 28)           \
-		| (UMP_STREAM_STATUS_FB_INFO << 16) \
-		| BIT_IF(active, 15)                \
-		| (((n) & BIT_MASK(7)) << 8)         \
-		| BIT_IF(is_out, 5)                 \
-		| BIT_IF(is_in, 4)                  \
-		| (((midi1) & BIT_MASK(2)) << 2)     \
-		| BIT_IF(is_out, 1)                 \
-		| BIT_IF(is_in, 0),                  \
-		(((fstgrp) & BIT_MASK(8)) << 24)     \
-		| (((ngrps) & BIT_MASK(8)) << 16)    \
-		| (((civers) & BIT_MASK(8)) << 8)    \
-		| ((nstreams) & BIT_MASK(8))         \
-	}}
-
-/** @} */
-
 #define UMP_STREAM_FB_DISCOVERY_NUM(ump) \
 	(((ump).data[0] >> 8) & BIT_MASK(8))
+
+/** @} */
 
 #ifdef __cplusplus
 }
