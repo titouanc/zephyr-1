@@ -18,8 +18,6 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
 
-#define MY_PORT 5673
-
 #if ! DT_HAS_CHOSEN(midi_tx_uart)
 static inline void send_midi1(...) {}
 #else
@@ -94,22 +92,18 @@ static const struct udp_midi_userlist authorized_users = {
 	},
 };
 
+struct sockaddr_in addr4 = {.sin_family = AF_INET};
+
 UDP_MIDI_EP_DECLARE(midi_server, 10);
 
-DNS_SD_REGISTER_UDP_SERVICE(midi_dns, CONFIG_NET_HOSTNAME, "_midi2", "local",
-			    DNS_SD_EMPTY_TXT, MY_PORT);
+DNS_SD_REGISTER_SERVICE(midi_dns, CONFIG_NET_HOSTNAME, "_midi2", "_udp",
+			"local", DNS_SD_EMPTY_TXT, &addr4.sin_port);
 
 int main(void)
 {
-	struct sockaddr_in addr4;
-
 #if DT_HAS_CHOSEN(midi_tx_led)
 	gpio_pin_configure_dt(&act_led, GPIO_OUTPUT_INACTIVE);
 #endif /* DT_HAS_CHOSEN(midi_tx_led) */
-
-	memset(&addr4, 0, sizeof(addr4));
-	addr4.sin_family = AF_INET;
-	addr4.sin_port = htons(MY_PORT);
 
 	midi_server.rx_packet_cb = netmidi2_callback;
 	midi_server.auth_type = UDP_MIDI_NO_AUTH;
