@@ -43,7 +43,7 @@ enum udp_midi_session_state {
 	AUTHENTICATION_REQUIRED,
 	ESTABLISHED_SESSION,
 	PENDING_SESSION_RESET,
-	PENDING_BYTE,
+	PENDING_BYE,
 };
 
 struct udp_midi_ep;
