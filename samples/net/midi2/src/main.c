@@ -96,8 +96,8 @@ struct sockaddr_in addr4 = {.sin_family = AF_INET};
 
 UDP_MIDI_EP_DECLARE(midi_server, 10);
 
-DNS_SD_REGISTER_SERVICE(midi_dns, CONFIG_NET_HOSTNAME, "_midi2", "_udp",
-			"local", DNS_SD_EMPTY_TXT, &addr4.sin_port);
+DNS_SD_REGISTER_SERVICE(midi_dns, CONFIG_NET_HOSTNAME "-" CONFIG_BOARD,
+			"_midi2", "_udp", "local", DNS_SD_EMPTY_TXT, &addr4.sin_port);
 
 int main(void)
 {
