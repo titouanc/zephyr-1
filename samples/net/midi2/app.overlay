@@ -15,6 +15,7 @@
 		midi2@0 {
 			reg = <0 4>;
 			label = "Synthesizer";
+			protocol = "midi2";
 		};
 
 		midi1@8 {
@@ -29,6 +30,7 @@
 			protocol = "midi1-up-to-64b";
 			terminal-type = "output-only";
 			label = "External output (MIDI DIN-5)";
+			serial-31250bps;
 		};
 	};
 };
