@@ -69,17 +69,11 @@ static inline void udp_midi_free_inactive_sessions(struct udp_midi_ep *ep)
 
 	for (size_t i=0; i<ep->n_peers; i++) {
 		sess = &ep->peers[i];
-		switch (sess->state) {
-		case IDLE:
-		case PENDING_INVITATION:
-		case AUTHENTICATION_REQUIRED:
-		case PENDING_BYE:
+		if (! udp_midi_session_has_state(sess, ESTABLISHED_SESSION)) {
 			SESS_LOG_WRN(sess, "Cleanup inactive session");
 			zsock_sendto(ep->sock, bye_timeout, sizeof(bye_timeout),
 				     0, &sess->addr, sess->addr_len);
 			udp_midi_free_session(sess);
-		default:
-			continue;
 		}
 	}
 }
