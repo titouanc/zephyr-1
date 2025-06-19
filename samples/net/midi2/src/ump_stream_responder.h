@@ -11,6 +11,7 @@ struct ump_block_dt_spec {
 	bool is_input;
 	bool is_output;
 	bool is_midi1;
+	bool is_31250bps;
 };
 
 struct ump_endpoint_dt_spec {
@@ -25,14 +26,15 @@ struct ump_stream_responder_cfg {
 	const struct ump_endpoint_dt_spec *ep_spec;
 };
 
-#define UMP_BLOCK_DT_SPEC_GET(_node)                                   \
-{                                                                      \
-	.name = DT_PROP_OR(_node, label, DT_NODE_FULL_NAME(_node)),        \
-	.first_group = DT_REG_ADDR(_node),                                 \
-	.groups_spanned = DT_REG_SIZE(_node),                              \
+#define UMP_BLOCK_DT_SPEC_GET(_node)					   \
+{									   \
+	.name = DT_PROP_OR(_node, label, DT_NODE_FULL_NAME(_node)),	   \
+	.first_group = DT_REG_ADDR(_node),				   \
+	.groups_spanned = DT_REG_SIZE(_node),				   \
 	.is_input = !DT_ENUM_HAS_VALUE(_node, terminal_type, output_only), \
 	.is_output = !DT_ENUM_HAS_VALUE(_node, terminal_type, input_only), \
-	.is_midi1 = !DT_ENUM_HAS_VALUE(_node, protocol, midi2),            \
+	.is_midi1 = !DT_ENUM_HAS_VALUE(_node, protocol, midi2),		   \
+	.is_31250bps = DT_PROP(_node, serial_31250bps),			   \
 }
 
 #define UMP_BLOCK_SEP_IF_OKAY(_node) \

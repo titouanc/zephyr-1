@@ -112,7 +112,7 @@ int main(void)
 	addr4.sin_port = htons(MY_PORT);
 
 	midi_server.rx_packet_cb = netmidi2_callback;
-	midi_server.auth_type = UDP_MIDI_USER_PASSWORD;
+	midi_server.auth_type = UDP_MIDI_NO_AUTH;
 	midi_server.userlist = &authorized_users;
 	udp_midi_ep_start(&midi_server, (const struct sockaddr *) &addr4, sizeof(addr4));
 
