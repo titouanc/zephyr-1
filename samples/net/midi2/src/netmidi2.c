@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <zephyr/crypto/crypto.h>
+#include <zephyr/net/socket_service.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
@@ -65,7 +66,7 @@ static inline void udp_midi_free_inactive_sessions(struct udp_midi_ep *ep)
 		sess = &ep->peers[i];
 		if (! SESSION_HAS_STATE(sess, ESTABLISHED_SESSION)) {
 			SESS_LOG_WRN(sess, "Cleanup inactive session");
-			zsock_sendto(ep->sock, bye_timeout, sizeof(bye_timeout),
+			zsock_sendto(ep->pollsock.fd, bye_timeout, sizeof(bye_timeout),
 				     0, &sess->addr, sess->addr_len);
 			udp_midi_free_session(sess);
 		}
@@ -161,6 +162,9 @@ static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
 		memcpy(&input[UDP_MIDI_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
 		hash.in_len += secret_len;
 	} else if (sess->ep->auth_type == UDP_MIDI_USER_PASSWORD) {
+		/* TODO: better handling of username length !
+		 * It's actually NOT always the buffer length,
+		 * as other command packets may follow */
 		user = udp_midi_find_user(sess->ep, buf->data, buf->len);
 		if (! user) {
 			LOG_ERR("No matching user found");
@@ -183,6 +187,17 @@ static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
 	hash_free_session(hasher, &ctx);
 
 	return memcmp(hash.out_buf, auth_digest, 32) == 0;
+}
+
+static void udp_midi_session_tx_work(struct k_work *work)
+{
+	struct udp_midi_session *session = CONTAINER_OF(work, struct udp_midi_session, tx_work);
+	struct net_buf *buf = session->tx_buf;
+	session->tx_buf = NULL;
+
+	zsock_sendto(session->ep->pollsock.fd, buf->data, buf->len, 0,
+		     &session->addr, session->addr_len);
+	net_buf_unref(buf);
 }
 
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
@@ -243,6 +258,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 						  : COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED);
 			net_buf_simple_add_u8(tx, 4);
 			net_buf_simple_add_be16(tx, 0);
+			/* TODO: Set a random nonce */
 			memcpy(session->nonce, "nUWrn*@#$hjfwnkL", UDP_MIDI_NONCE_SIZE);
 			net_buf_simple_add_mem(tx, session->nonce, UDP_MIDI_NONCE_SIZE);
 			session->state = AUTHENTICATION_REQUIRED;
@@ -342,25 +358,24 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	return 0;
 }
 
-static void udp_midi_rx_work(struct k_work *work)
+static void udp_midi_service_handler(struct net_socket_service_event *pev)
 {
 	int ret;
+	struct udp_midi_ep *ep = pev->user_data;
+	struct pollfd *pfd = &pev->event;
 	struct sockaddr peer_addr;
 	socklen_t peer_addr_len = sizeof(peer_addr);
-	struct udp_midi_ep *ep = CONTAINER_OF(work, struct udp_midi_ep, rx_work);
 	struct net_buf_simple *rxbuf = NET_BUF_SIMPLE(BUFSIZE);
 	struct net_buf_simple *txbuf = NET_BUF_SIMPLE(BUFSIZE);
 
 	net_buf_simple_init(rxbuf, 0);
 	net_buf_simple_init(txbuf, 0);
 
-	/* Receive packet */
-	LOG_DBG("Waiting for new UDP packet...");
-
-	ret = zsock_recvfrom(ep->sock, rxbuf->data, rxbuf->size, 0, &peer_addr, &peer_addr_len);
+	ret = zsock_recvfrom(pfd->fd, rxbuf->data, rxbuf->size, 0,
+			     &peer_addr, &peer_addr_len);
 	if (ret < 0) {
 		LOG_ERR("Rx error: %d (%d)", ret, errno);
-		goto end;
+		return;
 	}
 	rxbuf->len = ret;
 
@@ -369,7 +384,7 @@ static void udp_midi_rx_work(struct k_work *work)
 	/* Check for magic header */
 	if (rxbuf->len < 4 || memcmp(rxbuf->data, "MIDI", 4) != 0) {
 		LOG_WRN("Not a MIDI packet");
-		goto end;
+		return;
 	}
 
 	net_buf_simple_pull(rxbuf, 4);
@@ -384,53 +399,50 @@ static void udp_midi_rx_work(struct k_work *work)
 	/* Send reply if non empty */
 	if (txbuf->len > 4) {
 		LOG_HEXDUMP_DBG(txbuf->data, txbuf->len, "Sending UDP packet...");
-		ret = zsock_sendto(ep->sock, txbuf->data, txbuf->len, 0, &peer_addr, peer_addr_len);
+		ret = zsock_sendto(ep->pollsock.fd, txbuf->data, txbuf->len, 0, &peer_addr, peer_addr_len);
 		if (ret < 0) {
 			LOG_ERR("Unable to send reply: %d", errno);
 		}
 	}
-
-	end:
-		k_work_submit(&ep->rx_work);
 }
 
-static void udp_midi_session_tx_work(struct k_work *work)
-{
-	struct udp_midi_session *session = CONTAINER_OF(work, struct udp_midi_session, tx_work);
-	struct net_buf *buf = session->tx_buf;
-	session->tx_buf = NULL;
-
-	zsock_sendto(session->ep->sock, buf->data, buf->len, 0,
-		     &session->addr, session->addr_len);
-	net_buf_unref(buf);
-}
+NET_SOCKET_SERVICE_SYNC_DEFINE_STATIC(udp_midi_service, udp_midi_service_handler, 1);
 
 int udp_midi_ep_start(struct udp_midi_ep *ep,
 		      const struct sockaddr *addr, socklen_t addr_len)
 {
 	int ret;
+	int sock;
 	memset(ep->peers, 0, ep->n_peers * sizeof(ep->peers[0]));
 
-	ep->sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (ep->sock < 0) {
+	sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (sock < 0) {
 		LOG_ERR("Unable to create socket: %d", errno);
-		return -1;
+		return -ENOMEM;
 	}
 
-	ret = zsock_bind(ep->sock, addr, addr_len);
+	ret = zsock_bind(sock, addr, addr_len);
 	if (ret < 0) {
+		zsock_close(sock);
 		LOG_ERR("Failed to bind UDP socket: %d", errno);
-		ret = -errno;
+		return -EIO;
 	}
-
-	k_work_init(&ep->rx_work, udp_midi_rx_work);
-	k_work_submit(&ep->rx_work);
 
 	for (size_t i=0; i<ep->n_peers; i++) {
 		k_work_init(&ep->peers[i].tx_work, udp_midi_session_tx_work);
 	}
 
-	return ret;
+	ep->pollsock.fd = sock;
+	ep->pollsock.events = POLLIN;
+	ret = net_socket_service_register(&udp_midi_service, &ep->pollsock, 1, ep);
+	if (ret < 0) {
+		zsock_close(sock);
+		LOG_ERR("Failed to bind UDP socket: %d", errno);
+		return -EIO;
+	}
+
+	LOG_INF("Started UDP-MIDI2 server");
+	return 0;
 }
 
 void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump)
