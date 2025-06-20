@@ -130,19 +130,19 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 				  const struct midi_ump pkt)
 {
 	int res = 0;
-	LOG_INF("Endpoint discovery ump v%d.%d filter=%02X",
-		UMP_STREAM_EP_DISCOVERY_VMAJ(pkt),
-		UMP_STREAM_EP_DISCOVERY_VMIN(pkt),
-		UMP_STREAM_EP_DISCOVERY_FILTER(pkt));
+	uint8_t vmaj = UMP_STREAM_EP_DISCOVERY_VMAJ(pkt);
+	uint8_t vmin = UMP_STREAM_EP_DISCOVERY_VMIN(pkt);
+	uint8_t filter = UMP_STREAM_EP_DISCOVERY_FILTER(pkt);
+	LOG_INF("Endpoint discovery ump v%d.%d filter=%02X", vmaj, vmin, filter);
 
 	/* Request for Endpoint Info Notification */
-	if (UMP_STREAM_EP_DISCOVERY_FILTER(pkt) & UMP_EP_DISC_FILTER_EP_INFO) {
+	if (filter & UMP_EP_DISC_FILTER_EP_INFO) {
 		cfg->send(cfg->dev, make_endpoint_info(cfg->ep_spec));
 		res++;
 	}
 
 	/* Request for Endpoint Name Notification */
-	if (UMP_STREAM_EP_DISCOVERY_FILTER(pkt) & UMP_EP_DISC_FILTER_EP_NAME) {
+	if (filter & UMP_EP_DISC_FILTER_EP_NAME) {
 		res += send_string(cfg, cfg->ep_spec->name,
 				   UMP_STREAM_STATUS_EP_NAME << 16, 2);
 	}
@@ -155,6 +155,7 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 {
 	int res = 0;
 	uint8_t block_num = UMP_STREAM_FB_DISCOVERY_NUM(pkt);
+	uint8_t filter = UMP_STREAM_FB_DISCOVERY_FILTER(pkt);
 
 	if (block_num >= cfg->ep_spec->n_blocks) {
 		LOG_WRN("Function block discovery block=%d does not exist", block_num);
@@ -163,15 +164,14 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 
 	const struct ump_block_dt_spec *blk = &cfg->ep_spec->blocks[block_num];
 
-	LOG_INF("Function block discovery block=%d filter=%02X", block_num,
-		UMP_STREAM_FB_DISCOVERY_FILTER(pkt));
+	LOG_INF("Function block discovery block=%d filter=%02X", block_num, filter);
 
-	if (UMP_STREAM_FB_DISCOVERY_FILTER(pkt) & UMP_FB_DISC_FILTER_INFO) {
+	if (filter & UMP_FB_DISC_FILTER_INFO) {
 		cfg->send(cfg->dev, make_function_block_info(cfg->ep_spec, block_num));
 		res++;
 	}
 
-	if (UMP_STREAM_FB_DISCOVERY_FILTER(pkt) & UMP_FB_DISC_FILTER_NAME) {
+	if (filter & UMP_FB_DISC_FILTER_NAME) {
 		res += send_string(cfg, blk->name,
 				   (UMP_STREAM_STATUS_FB_NAME << 16) | (block_num << 8), 3);
 	}
