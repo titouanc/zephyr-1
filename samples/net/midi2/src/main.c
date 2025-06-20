@@ -19,8 +19,8 @@
 LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
 
 #if ! DT_HAS_CHOSEN(midi_tx_uart)
-static inline void send_midi1(...) {}
-#else
+static inline void send_midi1(const struct midi_ump ump) {}
+#else /* DT_HAS_CHOSEN(midi_tx_uart) */
 #include <zephyr/drivers/uart.h>
 
 static const struct device *const uart_dev =
