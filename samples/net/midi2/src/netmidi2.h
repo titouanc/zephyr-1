@@ -8,8 +8,9 @@
 #define NETMIDI2_H_
 
 #include <stdint.h>
-#include <zephyr/net/socket.h>
 #include <zephyr/audio/midi.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/posix/poll.h>
 
 #define CLIENT_CAP_INV_WITH_AUTH	BIT(0)
 #define CLIENT_CAP_INV_WITH_USER_AUTH	BIT(1)
@@ -80,8 +81,7 @@ enum udp_midi_auth_type {
 };
 
 struct udp_midi_ep {
-	int sock;
-	struct k_work rx_work;
+	struct pollfd pollsock;
 	void (*rx_packet_cb)(struct udp_midi_session *session,
 			     const struct midi_ump ump);
 	size_t n_peers;
