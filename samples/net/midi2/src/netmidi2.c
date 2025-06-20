@@ -19,18 +19,12 @@ NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
 	{ \
 		const struct sockaddr_in *__pa = (const struct sockaddr_in *) &(_s)->addr; \
 		char __pn[INET_ADDRSTRLEN]; \
-		net_addr_ntop(AF_INET, &__pa->sin_addr, __pn, INET_ADDRSTRLEN); \
+		net_addr_ntop(AF_INET, &__pa->sin_addr, __pn, sizeof(__pn)); \
 		LOG_##_lvl("%s:%d " _fmt, __pn, __pa->sin_port, ##__VA_ARGS__); \
 	}
 
-static inline bool udp_midi_session_has_state(struct udp_midi_session *session,
-					      enum udp_midi_session_state state)
-{
-	if (! session) {
-		return false;
-	}
-	return session->state == state;
-}
+#define SESSION_HAS_STATE(session, expected_state) \
+	((session) && (session)->state == expected_state)
 
 static inline void udp_midi_free_session(struct udp_midi_session *session)
 {
@@ -69,7 +63,7 @@ static inline void udp_midi_free_inactive_sessions(struct udp_midi_ep *ep)
 
 	for (size_t i=0; i<ep->n_peers; i++) {
 		sess = &ep->peers[i];
-		if (! udp_midi_session_has_state(sess, ESTABLISHED_SESSION)) {
+		if (! SESSION_HAS_STATE(sess, ESTABLISHED_SESSION)) {
 			SESS_LOG_WRN(sess, "Cleanup inactive session");
 			zsock_sendto(ep->sock, bye_timeout, sizeof(bye_timeout),
 				     0, &sess->addr, sess->addr_len);
@@ -259,7 +253,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	case COMMAND_INVITATION_WITH_AUTH:
 	case COMMAND_INVITATION_WITH_USER_AUTH:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
-		if (! udp_midi_session_has_state(session, AUTHENTICATION_REQUIRED)) {
+		if (! SESSION_HAS_STATE(session, AUTHENTICATION_REQUIRED)) {
 			LOG_WRN("No session to authenticate found");
 			return -1;
 		}
@@ -293,7 +287,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 
 	case COMMAND_UMP_DATA:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
-		if (! udp_midi_session_has_state(session, ESTABLISHED_SESSION)) {
+		if (! SESSION_HAS_STATE(session, ESTABLISHED_SESSION)) {
 			LOG_WRN("Receiving UMP data without established session");
 			return -1;
 		}
@@ -327,7 +321,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 
 	case COMMAND_SESSION_RESET:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
-		if (! udp_midi_session_has_state(session, ESTABLISHED_SESSION)) {
+		if (! SESSION_HAS_STATE(session, ESTABLISHED_SESSION)) {
 			LOG_WRN("Receiving session reset without established session");
 			return -1;
 		}
