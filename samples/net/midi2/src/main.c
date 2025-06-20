@@ -58,6 +58,7 @@ static inline void send_midi1(const struct midi_ump ump)
 }
 #endif /* DT_HAS_CHOSEN(midi_tx_uart) */
 
+
 static const struct ump_endpoint_dt_spec ump_ep_dt =
 	UMP_ENDPOINT_DT_SPEC_GET(DT_NODELABEL(midi2));
 
@@ -88,7 +89,7 @@ static void netmidi2_callback(struct udp_midi_session *session,
 static const struct udp_midi_userlist authorized_users = {
 	.n_users=1,
 	.users={
-		{.name="Titou", .password="Coucou"}
+		{.name="Titou", .password="Coucou"},
 	},
 };
 
