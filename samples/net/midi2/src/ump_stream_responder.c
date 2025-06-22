@@ -133,7 +133,7 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 	uint8_t vmaj = UMP_STREAM_EP_DISCOVERY_VMAJ(pkt);
 	uint8_t vmin = UMP_STREAM_EP_DISCOVERY_VMIN(pkt);
 	uint8_t filter = UMP_STREAM_EP_DISCOVERY_FILTER(pkt);
-	LOG_INF("Endpoint discovery ump v%d.%d filter=%02X", vmaj, vmin, filter);
+	LOG_DBG("Endpoint discovery ump v%d.%d filter=%02X", vmaj, vmin, filter);
 
 	/* Request for Endpoint Info Notification */
 	if (filter & UMP_EP_DISC_FILTER_EP_INFO) {
@@ -164,7 +164,7 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 
 	const struct ump_block_dt_spec *blk = &cfg->ep_spec->blocks[block_num];
 
-	LOG_INF("Function block discovery block=%d filter=%02X", block_num, filter);
+	LOG_DBG("Function block discovery block=%d filter=%02X", block_num, filter);
 
 	if (filter & UMP_FB_DISC_FILTER_INFO) {
 		cfg->send(cfg->dev, make_function_block_info(cfg->ep_spec, block_num));
