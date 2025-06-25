@@ -7,6 +7,27 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
 
+/* See udp-ump 5.5: Command Codes and Packet Types */
+enum udp_midi_cmd {
+	COMMAND_INVITATION = 0x01,
+	COMMAND_INVITATION_WITH_AUTH = 0x02,
+	COMMAND_INVITATION_WITH_USER_AUTH = 0x03,
+	COMMAND_INVITATION_REPLY_ACCEPTED = 0x10,
+	COMMAND_INVITATION_REPLY_PENDING = 0x11,
+	COMMAND_INVITATION_REPLY_AUTH_REQUIRED = 0x12,
+	COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED = 0x13,
+	COMMAND_PING = 0x20,
+	COMMAND_PING_REPLY = 0x21,
+	COMMAND_RETRANSMIT_REQUEST = 0x80,
+	COMMAND_RETRANSMIT_ERROR = 0x81,
+	COMMAND_SESSION_RESET = 0x82,
+	COMMAND_SESSION_RESET_REPLY = 0x83,
+	COMMAND_NAK = 0x8F,
+	COMMAND_BYE = 0xF0,
+	COMMAND_BYE_REPLY = 0xF1,
+	COMMAND_UMP_DATA = 0xFF,
+};
+
 #define BUFSIZE 256
 
 NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
@@ -158,7 +179,7 @@ static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
 
 	memcpy(input, sess->nonce, UDP_MIDI_NONCE_SIZE);
 
-	if (sess->ep->auth_type == UDP_MIDI_SHARED_SECRET) {
+	if (sess->ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET) {
 		memcpy(&input[UDP_MIDI_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
 		hash.in_len += secret_len;
 	} else if (sess->ep->auth_type == UDP_MIDI_USER_PASSWORD) {
@@ -248,12 +269,12 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			return -1;
 		}
 
-		if (ep->auth_type == UDP_MIDI_NO_AUTH) {
+		if (ep->auth_type == UDP_MIDI_AUTH_NONE) {
 			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
 			net_buf_simple_add_be24(tx, 0);
 			session->state = ESTABLISHED_SESSION;
 		} else {
-			net_buf_simple_add_u8(tx, ep->auth_type == UDP_MIDI_SHARED_SECRET
+			net_buf_simple_add_u8(tx, ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET
 						  ? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
 						  : COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED);
 			net_buf_simple_add_u8(tx, 4);
@@ -408,12 +429,13 @@ static void udp_midi_service_handler(struct net_socket_service_event *pev)
 
 NET_SOCKET_SERVICE_SYNC_DEFINE_STATIC(udp_midi_service, udp_midi_service_handler, 1);
 
-int udp_midi_ep_start(struct udp_midi_ep *ep,
-		      const struct sockaddr *addr, socklen_t addr_len)
+int udp_midi_ep_init(struct udp_midi_ep *ep)
 {
 	int ret;
 	int sock;
 	memset(ep->peers, 0, ep->n_peers * sizeof(ep->peers[0]));
+	memset(&ep->addr4, 0, sizeof(ep->addr4));
+	ep->addr4.sin_family = AF_INET;
 
 	sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0) {
@@ -421,7 +443,7 @@ int udp_midi_ep_start(struct udp_midi_ep *ep,
 		return -ENOMEM;
 	}
 
-	ret = zsock_bind(sock, addr, addr_len);
+	ret = zsock_bind(sock, (const struct sockaddr *) &ep->addr4, sizeof(ep->addr4));
 	if (ret < 0) {
 		zsock_close(sock);
 		LOG_ERR("Failed to bind UDP socket: %d", errno);
