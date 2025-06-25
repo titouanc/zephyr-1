@@ -86,19 +86,18 @@ static void netmidi2_callback(struct udp_midi_session *session,
 	}
 }
 
-static const struct udp_midi_userlist authorized_users = {
-	.n_users=1,
-	.users={
-		{.name="Titou", .password="Coucou"},
-	},
-};
-
-struct sockaddr_in addr4 = {.sin_family = AF_INET};
-
-UDP_MIDI_EP_DECLARE(midi_server, 10);
+// UDP_MIDI_EP_DECLARE_NO_AUTH(midi_server, 5, 0);
+// UDP_MIDI_EP_DECLARE_WITH_AUTH(midi_server, 5, 0, "a-secret-passphrase");
+UDP_MIDI_EP_DECLARE_WITH_USERS(midi_server, 5, 0,
+	{.name = "Alice", .password = "wonderland"},
+	{.name = "Bob", .password = "sponge"},
+	{.name = "Patrick", .password = "starfish"},
+	{.name = "zephyr", .password = "flying-kite"},
+);
 
 DNS_SD_REGISTER_SERVICE(midi_dns, CONFIG_NET_HOSTNAME "-" CONFIG_BOARD,
-			"_midi2", "_udp", "local", DNS_SD_EMPTY_TXT, &addr4.sin_port);
+			"_midi2", "_udp", "local", DNS_SD_EMPTY_TXT,
+			&midi_server.addr4.sin_port);
 
 int main(void)
 {
@@ -107,9 +106,7 @@ int main(void)
 #endif /* DT_HAS_CHOSEN(midi_tx_led) */
 
 	midi_server.rx_packet_cb = netmidi2_callback;
-	midi_server.auth_type = UDP_MIDI_NO_AUTH;
-	midi_server.userlist = &authorized_users;
-	udp_midi_ep_start(&midi_server, (const struct sockaddr *) &addr4, sizeof(addr4));
+	udp_midi_ep_init(&midi_server);
 
 	return 0;
 }
