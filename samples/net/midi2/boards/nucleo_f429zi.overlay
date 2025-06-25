@@ -1,9 +1,9 @@
 #include "../app.overlay"
 
 / {
-	chosen {
-		midi,tx-uart = &arduino_serial;
-		midi,tx-led = &midi_green_led;
+	aliases {
+		midi-tx-uart = &arduino_serial;
+		midi-tx-led = &midi_green_led;
 	};
 
 	leds {
