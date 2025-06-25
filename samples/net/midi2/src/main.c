@@ -18,27 +18,27 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
 
-#if DT_HAS_CHOSEN(midi_tx_led)
+#if DT_HAS_ALIAS(midi_tx_led)
 #include <zephyr/drivers/gpio.h>
 
 static const struct gpio_dt_spec act_led =
-	GPIO_DT_SPEC_GET_OR(DT_CHOSEN(midi_tx_led), gpios, {0});
+	GPIO_DT_SPEC_GET_OR(DT_ALIAS(midi_tx_led), gpios, {0});
 
 #define CONFIGURE_LED() gpio_pin_configure_dt(&act_led, GPIO_OUTPUT_INACTIVE)
 #define SET_LED(_state) gpio_pin_set_dt(&act_led, (_state))
 #else
 #define CONFIGURE_LED()
 #define SET_LED(_state)
-#endif  /* DT_HAS_CHOSEN(midi_tx_led) */
+#endif  /* DT_HAS_ALIAS(midi_tx_led) */
 
 
-#if ! DT_HAS_CHOSEN(midi_tx_uart)
+#if ! DT_HAS_ALIAS(midi_tx_uart)
 #define send_external_midi1(...)
-#else /* DT_HAS_CHOSEN(midi_tx_uart) */
+#else /* DT_HAS_ALIAS(midi_tx_uart) */
 #include <zephyr/drivers/uart.h>
 
 static const struct device *const uart_dev =
-	DEVICE_DT_GET(DT_CHOSEN(midi_tx_uart));
+	DEVICE_DT_GET(DT_ALIAS(midi_tx_uart));
 
 static inline void send_external_midi1(const struct midi_ump ump)
 {
@@ -63,7 +63,7 @@ static inline void send_external_midi1(const struct midi_ump ump)
 		break;
 	}
 }
-#endif /* DT_HAS_CHOSEN(midi_tx_uart) */
+#endif /* DT_HAS_ALIAS(midi_tx_uart) */
 
 
 static const struct ump_endpoint_dt_spec ump_ep_dt =
@@ -93,18 +93,20 @@ static void netmidi2_callback(struct udp_midi_session *session,
 	}
 }
 
+#define MAX_CLIENTS CONFIG_NET_SAMPLE_MIDI2_MAX_CLIENTS
+
 #if CONFIG_NET_SAMPLE_MIDI2_AUTH_NONE
 
-UDP_MIDI_EP_DECLARE_NO_AUTH(midi_server, 5, 0);
+UDP_MIDI_EP_DECLARE_NO_AUTH(midi_server, MAX_CLIENTS, 0);
 
 #elif CONFIG_NET_SAMPLE_MIDI2_AUTH_SHARED_SECRET
 
-UDP_MIDI_EP_DECLARE_WITH_AUTH(midi_server, 5, 0,
+UDP_MIDI_EP_DECLARE_WITH_AUTH(midi_server, MAX_CLIENTS, 0,
 	CONFIG_NET_SAMPLE_MIDI2_SHARED_SECRET);
 
 #elif CONFIG_NET_SAMPLE_MIDI2_AUTH_USER_PASSWORD
 
-UDP_MIDI_EP_DECLARE_WITH_USERS(midi_server, 5, 0,
+UDP_MIDI_EP_DECLARE_WITH_USERS(midi_server, MAX_CLIENTS, 0,
 	{.name = CONFIG_NET_SAMPLE_MIDI2_USERNAME1,
 	 .password = CONFIG_NET_SAMPLE_MIDI2_PASSWORD1},
 	{.name = CONFIG_NET_SAMPLE_MIDI2_USERNAME2,
