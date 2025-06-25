@@ -18,42 +18,49 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
 
+#if DT_HAS_CHOSEN(midi_tx_led)
+#include <zephyr/drivers/gpio.h>
+
+static const struct gpio_dt_spec act_led =
+	GPIO_DT_SPEC_GET_OR(DT_CHOSEN(midi_tx_led), gpios, {0});
+
+#define CONFIGURE_LED() gpio_pin_configure_dt(&act_led, GPIO_OUTPUT_INACTIVE)
+#define SET_LED(_state) gpio_pin_set_dt(&act_led, (_state))
+#else
+#define CONFIGURE_LED()
+#define SET_LED(_state)
+#endif  /* DT_HAS_CHOSEN(midi_tx_led) */
+
+
 #if ! DT_HAS_CHOSEN(midi_tx_uart)
-static inline void send_midi1(const struct midi_ump ump) {}
+#define send_external_midi1(...)
 #else /* DT_HAS_CHOSEN(midi_tx_uart) */
 #include <zephyr/drivers/uart.h>
 
 static const struct device *const uart_dev =
 	DEVICE_DT_GET(DT_CHOSEN(midi_tx_uart));
 
-#if DT_HAS_CHOSEN(midi_tx_led)
-#include <zephyr/drivers/gpio.h>
-
-static const struct gpio_dt_spec act_led =
-	GPIO_DT_SPEC_GET_OR(DT_CHOSEN(midi_tx_led), gpios, {0});
-#endif  /* DT_HAS_CHOSEN(midi_tx_led) */
-
-static inline void send_midi1(const struct midi_ump ump)
+static inline void send_external_midi1(const struct midi_ump ump)
 {
 	switch (UMP_MIDI_COMMAND(ump)) {
+	case UMP_MIDI_PROGRAM_CHANGE:
+		SET_LED(1);
+		uart_poll_out(uart_dev, UMP_MIDI_STATUS(ump));
+		uart_poll_out(uart_dev, UMP_MIDI1_P1(ump));
+		SET_LED(0);
+		break;
+
 	case UMP_MIDI_NOTE_OFF:
 	case UMP_MIDI_NOTE_ON:
 	case UMP_MIDI_AFTERTOUCH:
 	case UMP_MIDI_CONTROL_CHANGE:
 	case UMP_MIDI_PITCH_BEND:
-
-#if DT_HAS_CHOSEN(midi_tx_led)
-		gpio_pin_set_dt(&act_led, 1);
-#endif /* DT_HAS_CHOSEN(midi_tx_led) */
-
+		SET_LED(1);
 		uart_poll_out(uart_dev, UMP_MIDI_STATUS(ump));
 		uart_poll_out(uart_dev, UMP_MIDI1_P1(ump));
 		uart_poll_out(uart_dev, UMP_MIDI1_P2(ump));
-
-#if DT_HAS_CHOSEN(midi_tx_led)
-		gpio_pin_set_dt(&act_led, 0);
-#endif /* DT_HAS_CHOSEN(midi_tx_led) */
-
+		SET_LED(0);
+		break;
 	}
 }
 #endif /* DT_HAS_CHOSEN(midi_tx_uart) */
@@ -78,7 +85,7 @@ static void netmidi2_callback(struct udp_midi_session *session,
 {
 	switch (UMP_MT(ump)) {
 	case UMP_MT_MIDI1_CHANNEL_VOICE:
-		send_midi1(ump);
+		send_external_midi1(ump);
 		break;
 	case UMP_MT_UMP_STREAM:
 		handle_ump_stream(session, ump);
@@ -86,14 +93,24 @@ static void netmidi2_callback(struct udp_midi_session *session,
 	}
 }
 
-// UDP_MIDI_EP_DECLARE_NO_AUTH(midi_server, 5, 0);
-// UDP_MIDI_EP_DECLARE_WITH_AUTH(midi_server, 5, 0, "a-secret-passphrase");
+#if CONFIG_NET_SAMPLE_MIDI2_AUTH_NONE
+
+UDP_MIDI_EP_DECLARE_NO_AUTH(midi_server, 5, 0);
+
+#elif CONFIG_NET_SAMPLE_MIDI2_AUTH_SHARED_SECRET
+
+UDP_MIDI_EP_DECLARE_WITH_AUTH(midi_server, 5, 0,
+	CONFIG_NET_SAMPLE_MIDI2_SHARED_SECRET);
+
+#elif CONFIG_NET_SAMPLE_MIDI2_AUTH_USER_PASSWORD
+
 UDP_MIDI_EP_DECLARE_WITH_USERS(midi_server, 5, 0,
-	{.name = "Alice", .password = "wonderland"},
-	{.name = "Bob", .password = "sponge"},
-	{.name = "Patrick", .password = "starfish"},
-	{.name = "zephyr", .password = "flying-kite"},
-);
+	{.name = CONFIG_NET_SAMPLE_MIDI2_USERNAME1,
+	 .password = CONFIG_NET_SAMPLE_MIDI2_PASSWORD1},
+	{.name = CONFIG_NET_SAMPLE_MIDI2_USERNAME2,
+	 .password = CONFIG_NET_SAMPLE_MIDI2_PASSWORD2});
+
+#endif
 
 DNS_SD_REGISTER_SERVICE(midi_dns, CONFIG_NET_HOSTNAME "-" CONFIG_BOARD,
 			"_midi2", "_udp", "local", DNS_SD_EMPTY_TXT,
@@ -101,9 +118,7 @@ DNS_SD_REGISTER_SERVICE(midi_dns, CONFIG_NET_HOSTNAME "-" CONFIG_BOARD,
 
 int main(void)
 {
-#if DT_HAS_CHOSEN(midi_tx_led)
-	gpio_pin_configure_dt(&act_led, GPIO_OUTPUT_INACTIVE);
-#endif /* DT_HAS_CHOSEN(midi_tx_led) */
+	CONFIGURE_LED();
 
 	midi_server.rx_packet_cb = netmidi2_callback;
 	udp_midi_ep_init(&midi_server);
