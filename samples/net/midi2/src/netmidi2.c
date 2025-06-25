@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <zephyr/crypto/crypto.h>
 #include <zephyr/net/socket_service.h>
+#include <zephyr/random/random.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
@@ -279,8 +280,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 						  : COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED);
 			net_buf_simple_add_u8(tx, 4);
 			net_buf_simple_add_be16(tx, 0);
-			/* TODO: Set a random nonce */
-			memcpy(session->nonce, "nUWrn*@#$hjfwnkL", UDP_MIDI_NONCE_SIZE);
+			sys_rand_get(session->nonce, UDP_MIDI_NONCE_SIZE);
 			net_buf_simple_add_mem(tx, session->nonce, UDP_MIDI_NONCE_SIZE);
 			session->state = AUTHENTICATION_REQUIRED;
 		}
