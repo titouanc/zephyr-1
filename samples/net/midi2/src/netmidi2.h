@@ -15,27 +15,34 @@
 #define CLIENT_CAP_INV_WITH_AUTH	BIT(0)
 #define CLIENT_CAP_INV_WITH_USER_AUTH	BIT(1)
 
-#define COMMAND_INVITATION 0x01
-#define COMMAND_INVITATION_WITH_AUTH 0x02
-#define COMMAND_INVITATION_WITH_USER_AUTH 0x03
-#define COMMAND_INVITATION_REPLY_ACCEPTED 0x10
-#define COMMAND_INVITATION_REPLY_PENDING 0x11
-#define COMMAND_INVITATION_REPLY_AUTH_REQUIRED 0x12
-#define COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED 0x13
-#define COMMAND_PING 0x20
-#define COMMAND_PING_REPLY 0x21
-#define COMMAND_RETRANSMIT_REQUEST 0x80
-#define COMMAND_RETRANSMIT_ERROR 0x81
-#define COMMAND_SESSION_RESET 0x82
-#define COMMAND_SESSION_RESET_REPLY 0x83
-#define COMMAND_NAK 0x8F
-#define COMMAND_BYE 0xF0
-#define COMMAND_BYE_REPLY 0xF1
-#define COMMAND_UMP_DATA 0xFF
-
-#define UDP_MIDI_EP_DECLARE(_name, _n_peers) \
+#define UDP_MIDI_EP_DECLARE_NO_AUTH(_name, _n_peers, _port) \
 	static struct udp_midi_session peers_of_##_name[_n_peers]; \
-	static struct udp_midi_ep _name = {.n_peers = _n_peers, .peers = peers_of_##_name}
+	static struct udp_midi_ep _name = { \
+		.n_peers = _n_peers, .peers = peers_of_##_name, \
+		.auth_type = UDP_MIDI_AUTH_NONE, \
+		.addr4.sin_port = (_port) \
+	}
+
+#define UDP_MIDI_EP_DECLARE_WITH_AUTH(_name, _n_peers, _port, _secret) \
+	static struct udp_midi_session peers_of_##_name[_n_peers]; \
+	static struct udp_midi_ep _name = { \
+		.n_peers = (_n_peers), .peers = peers_of_##_name, \
+		.auth_type = UDP_MIDI_AUTH_SHARED_SECRET, \
+		.shared_auth_secret = (_secret), .addr4.sin_port = (_port) \
+	}
+
+#define UDP_MIDI_EP_DECLARE_WITH_USERS(_name, _n_peers, _port, ...) \
+	static struct udp_midi_session peers_of_##_name[_n_peers]; \
+	static const struct udp_midi_userlist users_of_##_name = { \
+		.n_users = ARRAY_SIZE(((struct udp_midi_user []) { __VA_ARGS__ })), \
+		.users = { __VA_ARGS__ }, \
+	}; \
+	static struct udp_midi_ep _name = { \
+		.n_peers = (_n_peers), .peers = peers_of_##_name, \
+		.auth_type = UDP_MIDI_USER_PASSWORD, \
+		.userlist = &users_of_##_name, \
+		.addr4.sin_port = (_port), \
+	}
 
 enum udp_midi_session_state {
 	NOT_INITIALIZED = 0,
@@ -75,12 +82,13 @@ struct udp_midi_session {
 };
 
 enum udp_midi_auth_type {
-	UDP_MIDI_NO_AUTH,
-	UDP_MIDI_SHARED_SECRET,
+	UDP_MIDI_AUTH_NONE,
+	UDP_MIDI_AUTH_SHARED_SECRET,
 	UDP_MIDI_USER_PASSWORD,
 };
 
 struct udp_midi_ep {
+	struct sockaddr_in addr4;
 	struct pollfd pollsock;
 	void (*rx_packet_cb)(struct udp_midi_session *session,
 			     const struct midi_ump ump);
@@ -93,8 +101,7 @@ struct udp_midi_ep {
 	};
 };
 
-int udp_midi_ep_start(struct udp_midi_ep *ep,
-		      const struct sockaddr *addr, socklen_t addr_len);
+int udp_midi_ep_init(struct udp_midi_ep *ep);
 
 /**
  * @brief      Send a Universal MIDI Packet to all clients connected to the endpoint
