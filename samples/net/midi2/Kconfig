@@ -3,6 +3,10 @@
 
 menu "Networking MIDI2 sample application"
 
+config NET_SAMPLE_MIDI2_MAX_CLIENTS
+	int "Maximum number of clients"
+	default 5
+
 choice NET_SAMPLE_MIDI2_AUTH_TYPE
 	prompt "UMP Endpoint authentication method"
 	default NET_SAMPLE_MIDI2_AUTH_NONE
