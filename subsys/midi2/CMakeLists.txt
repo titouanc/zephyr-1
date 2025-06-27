@@ -1,0 +1,2 @@
+zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_MIDI2_UMP_STREAM_RESPONDER ump_stream_responder.c)
