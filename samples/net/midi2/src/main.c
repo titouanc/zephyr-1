@@ -9,11 +9,11 @@
 #include <stdio.h>
 
 #include <zephyr/audio/midi.h>
+#include <zephyr/midi2/ump_stream_responder.h>
 #include <zephyr/net/dns_sd.h>
 #include <zephyr/net/socket.h>
 
 #include "netmidi2.h"
-#include "ump_stream_responder.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_midi2_sample, LOG_LEVEL_DBG);
