@@ -1,7 +1,6 @@
-#include "ump_stream_responder.h"
-
 #include <string.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/midi2/ump_stream_responder.h>
 #include <zephyr/sys/byteorder.h>
 
 #include <zephyr/logging/log.h>
