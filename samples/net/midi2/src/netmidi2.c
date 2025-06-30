@@ -275,6 +275,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			net_buf_simple_add_be24(tx, 0);
 			session->state = ESTABLISHED_SESSION;
 		} else {
+			/* TODO: if client has no auth caps; send BYE with reason 0x45 */
 			net_buf_simple_add_u8(tx, ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET
 						  ? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
 						  : COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED);

@@ -77,7 +77,7 @@ static inline void handle_ump_stream(struct udp_midi_session *session,
 		.send = (void (*)(void *, const struct midi_ump)) udp_midi_send,
 		.ep_spec = &ump_ep_dt,
 	};
-	ump_stream_responder(&responder_cfg, ump);
+	ump_stream_respond(&responder_cfg, ump);
 }
 
 static void netmidi2_callback(struct udp_midi_session *session,
