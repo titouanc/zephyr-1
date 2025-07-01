@@ -227,11 +227,128 @@ static void udp_midi_session_tx_work(struct k_work *work)
 	net_buf_unref(buf);
 }
 
+static inline int udp_midi_session_cmdheader(struct udp_midi_session *sess,
+					     const uint8_t command_code,
+					     const uint16_t command_specific_data,
+					     const uint8_t payload_len_words)
+{
+	if (! sess->tx_buf){
+		sess->tx_buf = net_buf_alloc(&udp_midi_pool, K_FOREVER);
+		if (! sess->tx_buf) {
+			SESS_LOG_ERR(sess, "Unable to allocate Tx buffer");
+			return -ENOBUFS;
+		}
+		net_buf_add_mem(sess->tx_buf, "MIDI", 4);
+	}
+
+	if (net_buf_tailroom(sess->tx_buf) < 4*(1 + payload_len_words)) {
+		SESS_LOG_WRN(sess, "Not enough room in Tx buffer");
+		return -ENOMEM;
+	}
+
+	net_buf_add_u8(sess->tx_buf, command_code);
+	net_buf_add_u8(sess->tx_buf, payload_len_words);
+	net_buf_add_be16(sess->tx_buf, command_specific_data);
+
+	return 0;
+}
+
+/**
+ * @brief      Send a Command Packet to a client session
+ * @param      sess                   The recipient session
+ * @param[in]  command_code           The command code
+ * @param[in]  command_specific_data  The command specific data
+ * @param[in]  payload                The command payload
+ * @param[in]  payload_len_words      Payload length, in words (4B)
+ * @return     0 on sucess, -errno otherwise
+ *
+ * @see udp-ump 5.4 Command Packet Header and Payload
+ */
+static int udp_midi_session_sendcmd(struct udp_midi_session *sess,
+			            const uint8_t command_code,
+			            const uint16_t command_specific_data,
+			            const uint32_t *payload,
+			            const uint8_t payload_len_words)
+{
+	int ret = udp_midi_session_cmdheader(sess, command_code,
+					     command_specific_data,
+					     payload_len_words);
+	if (ret) {
+		return ret;
+	}
+
+	for (size_t i=0; i<payload_len_words; i++){
+		net_buf_add_be32(sess->tx_buf, payload[i]);
+	}
+	k_work_submit(&sess->tx_work);
+	return 0;
+}
+
+static int udp_midi_session_sendcmd_u8(struct udp_midi_session *sess,
+			               const uint8_t command_code,
+			               const uint16_t command_specific_data,
+			               const uint8_t *payload,
+			               const uint8_t payload_len)
+{
+	uint8_t payload_len_words = DIV_ROUND_UP(payload_len, 4);
+	int ret = udp_midi_session_cmdheader(sess, command_code,
+					     command_specific_data,
+					     payload_len_words);
+	if (ret) {
+		return ret;
+	}
+
+	net_buf_add_mem(sess->tx_buf, payload, payload_len);
+	switch (payload_len % 4) {
+	case 1: net_buf_add_be24(sess->tx_buf, 0); break;
+	case 2: net_buf_add_be16(sess->tx_buf, 0); break;
+	case 3: net_buf_add_u8(sess->tx_buf, 0); break;
+	}
+
+	k_work_submit(&sess->tx_work);
+	return 0;
+}
+
+/**
+ * @brief      Immediately send a Command Packet to a remote without client session
+ * @param[in]  ep                     The emitting UMP endpoint
+ * @param[in]  peer_addr              The recipient's address
+ * @param[in]  peer_addr_len          The recipient's address length
+ * @param[in]  command_specific_data  The command specific data
+ * @param[in]  payload                The command payload
+ * @param[in]  payload_len_words      Payload length, in words (4B)
+ */
+static inline int udp_midi_quick_reply(const struct udp_midi_ep *ep,
+				       const struct sockaddr *peer_addr,
+				       const socklen_t peer_addr_len,
+				       const uint8_t command_code,
+			               const uint16_t command_specific_data,
+			               const uint32_t *payload,
+			               const uint8_t payload_len_words)
+{
+	NET_BUF_SIMPLE_DEFINE(txbuf, 24);
+
+	if (4 * (1 + payload_len_words) > txbuf.size) {
+		return -ENOBUFS;
+	}
+
+	net_buf_simple_add_u8(&txbuf, command_code);
+	net_buf_simple_add_u8(&txbuf, payload_len_words);
+	net_buf_simple_add_be16(&txbuf, command_specific_data);
+
+	for (size_t i=0; i<payload_len_words; i++){
+		net_buf_simple_add_be32(&txbuf, payload[i]);
+	}
+
+	zsock_sendto(ep->pollsock.fd, txbuf.data, txbuf.len, 0,
+		     peer_addr, peer_addr_len);
+	return 0;
+}
+
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 					    struct sockaddr *peer_addr,
 					    socklen_t peer_addr_len,
-					    struct net_buf *rx,
-					    struct net_buf_simple *tx)
+					    struct net_buf *rx)
 {
 	struct midi_ump ump;
 	size_t payload_len;
@@ -260,11 +377,9 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			LOG_ERR("Invalid payload length for PING packet");
 			return -1;
 		}
-		net_buf_simple_add_u8(tx, COMMAND_PING_REPLY);
-		net_buf_simple_add_u8(tx, 1);
-		net_buf_simple_add_be16(tx, 0);
-		/* PING id */
-		net_buf_simple_add_be32(tx, net_buf_pull_be32(rx));
+		udp_midi_quick_reply(ep, peer_addr, peer_addr_len,
+				     COMMAND_PING_REPLY, 0,
+				     (uint32_t [1]) {net_buf_pull_be32(rx)}, 1);
 		return 0;
 
 	case COMMAND_INVITATION:
@@ -276,8 +391,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		if (ep->auth_type == UDP_MIDI_AUTH_NONE) {
-			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
-			net_buf_simple_add_be24(tx, 0);
+			udp_midi_session_sendcmd(session, COMMAND_INVITATION_REPLY_ACCEPTED,
+						 0, NULL, 0);
 			session->state = ESTABLISHED_SESSION;
 		}
 
@@ -286,13 +401,16 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 #else
 		else {
 			/* TODO: if client has no auth caps; send BYE with reason 0x45 */
-			net_buf_simple_add_u8(tx, ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET
-						  ? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
-						  : COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED);
-			net_buf_simple_add_u8(tx, 4);
-			net_buf_simple_add_be16(tx, 0);
 			sys_rand_get(session->nonce, UDP_MIDI_NONCE_SIZE);
-			net_buf_simple_add_mem(tx, session->nonce, UDP_MIDI_NONCE_SIZE);
+			udp_midi_session_sendcmd_u8(
+				session,
+				ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET
+					? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
+					: COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED,
+				0,
+				session->nonce,
+				UDP_MIDI_NONCE_SIZE
+			);
 			session->state = AUTHENTICATION_REQUIRED;
 		}
 
@@ -316,8 +434,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			return -1;
 		}
 
-		net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
-		net_buf_simple_add_be24(tx, 0);
+		udp_midi_session_sendcmd(session, COMMAND_INVITATION_REPLY_ACCEPTED,
+					 0, NULL, 0);
 		session->state = ESTABLISHED_SESSION;
 		return 0;
 #endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
@@ -329,8 +447,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			return -1;
 		}
 		net_buf_pull(rx, payload_len);
-		net_buf_simple_add_u8(tx, COMMAND_BYE_REPLY);
-		net_buf_simple_add_be24(tx, 0);
+		udp_midi_quick_reply(ep, peer_addr, peer_addr_len,
+				     COMMAND_BYE_REPLY, 0, NULL, 0);
 		udp_midi_free_session(session);
 		return 0;
 
@@ -378,8 +496,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		session->tx_ump_seq = 0;
 		session->rx_ump_seq = 0;
 		SESS_LOG_INF(session, "Reset session");
-		net_buf_simple_add_u8(tx, COMMAND_SESSION_RESET_REPLY);
-		net_buf_simple_add_be24(tx, 0);
+		udp_midi_session_sendcmd(session, COMMAND_SESSION_RESET_REPLY, 0, NULL, 0);
 		return 0;
 
 	default:
@@ -399,15 +516,12 @@ static void udp_midi_service_handler(struct net_socket_service_event *pev)
 	struct sockaddr peer_addr;
 	socklen_t peer_addr_len = sizeof(peer_addr);
 	struct net_buf *rxbuf;
-	struct net_buf_simple *txbuf = NET_BUF_SIMPLE(BUFSIZE);
 
 	rxbuf = net_buf_alloc(&udp_midi_pool, K_FOREVER);
 	if (! rxbuf) {
 		NET_ERR("Cannot allocate Rx buf");
 		return;
 	}
-
-	net_buf_simple_init(txbuf, 0);
 
 	ret = zsock_recvfrom(pfd->fd, rxbuf->data, rxbuf->size, 0,
 			     &peer_addr, &peer_addr_len);
@@ -426,22 +540,12 @@ static void udp_midi_service_handler(struct net_socket_service_event *pev)
 	}
 
 	net_buf_pull(rxbuf, 4);
-	net_buf_simple_add_mem(txbuf, "MIDI", 4);
 
 	/* Parse contained command packets */
 	while (
 		rxbuf->len >= 4 &&
-		udp_midi_dispatch_command_packet(ep, &peer_addr, peer_addr_len, rxbuf, txbuf) == 0
+		udp_midi_dispatch_command_packet(ep, &peer_addr, peer_addr_len, rxbuf) == 0
 	);
-
-	/* Send reply if non empty */
-	if (txbuf->len > 4) {
-		LOG_HEXDUMP_DBG(txbuf->data, txbuf->len, "Sending UDP packet...");
-		ret = zsock_sendto(ep->pollsock.fd, txbuf->data, txbuf->len, 0, &peer_addr, peer_addr_len);
-		if (ret < 0) {
-			LOG_ERR("Unable to send reply: %d", errno);
-		}
-	}
 
 	end:
 	net_buf_unref(rxbuf);
@@ -498,22 +602,6 @@ void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump)
 
 void udp_midi_send(struct udp_midi_session *sess, const struct midi_ump ump)
 {
-	if (! sess->tx_buf){
-		sess->tx_buf = net_buf_alloc(&udp_midi_pool, K_FOREVER);
-		net_buf_add_be32(sess->tx_buf, 0x4d494449);
-	}
-
-	if (net_buf_tailroom(sess->tx_buf) < 4*(1 + UMP_NUM_WORDS(ump))) {
-		LOG_WRN("Not enough room in Tx buffer");
-		return;
-	}
-
-	net_buf_add_u8(sess->tx_buf, COMMAND_UMP_DATA);
-	net_buf_add_u8(sess->tx_buf, UMP_NUM_WORDS(ump));
-	net_buf_add_be16(sess->tx_buf, sess->tx_ump_seq++);
-
-	for (size_t i=0; i<UMP_NUM_WORDS(ump); i++){
-		net_buf_add_be32(sess->tx_buf, ump.data[i]);
-	}
-	k_work_submit(&sess->tx_work);
+	udp_midi_session_sendcmd(sess, COMMAND_UMP_DATA, sess->tx_ump_seq++,
+				 ump.data, UMP_NUM_WORDS(ump));
 }
