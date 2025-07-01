@@ -31,6 +31,13 @@ LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 #define CLIENT_CAP_INV_WITH_AUTH	BIT(0)
 #define CLIENT_CAP_INV_WITH_USER_AUTH	BIT(1)
 
+/* See udp-ump 6.15 / Table 25: List of NAK Reasons */
+#define NAK_OTHER			0x00
+#define NAK_COMMAND_NOT_SUPPORTED	0x01
+#define NAK_COMMAND_NOT_EXPECTED	0x02
+#define NAK_COMMAND_MALFORMED		0x03
+#define NAK_BAD_PING_REPLY		0x20
+
 #define SESS_LOG_DBG(_s, _fmt, ...) SESS_LOG(DBG, _s, _fmt, ##__VA_ARGS__)
 #define SESS_LOG_INF(_s, _fmt, ...) SESS_LOG(INFO, _s, _fmt, ##__VA_ARGS__)
 #define SESS_LOG_WRN(_s, _fmt, ...) SESS_LOG(WARN, _s, _fmt, ##__VA_ARGS__)
@@ -345,6 +352,18 @@ static inline int udp_midi_quick_reply(const struct udp_midi_ep *ep,
 	return 0;
 }
 
+
+static inline int udp_midi_quick_nak(const struct udp_midi_ep *ep,
+				       const struct sockaddr *peer_addr,
+				       const socklen_t peer_addr_len,
+				       const uint8_t nak_reason,
+			               const uint32_t nakd_cmd_header)
+{
+	return udp_midi_quick_reply(ep, peer_addr, peer_addr_len,
+				    COMMAND_NAK, nak_reason << 8,
+				    &nakd_cmd_header, 1);
+}
+
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 					    struct sockaddr *peer_addr,
 					    socklen_t peer_addr_len,
@@ -352,6 +371,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 {
 	struct midi_ump ump;
 	size_t payload_len;
+	uint32_t cmd_header;
 	uint8_t cmd_code, payload_len_words;
 	uint16_t cmd_data;
 	struct udp_midi_session *session;
@@ -361,12 +381,15 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		return -1;
 	}
 
-	cmd_code = net_buf_pull_u8(rx);
-	payload_len_words = net_buf_pull_u8(rx);
+	cmd_header = net_buf_pull_be32(rx);
+	cmd_code = cmd_header >> 24;
+	payload_len_words = (cmd_header >> 16) & 0xff;
 	payload_len = 4 * payload_len_words;
-	cmd_data = net_buf_pull_be16(rx);
+	cmd_data = cmd_header & 0xffff;
 
 	if (payload_len > rx->len) {
+		udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+				   NAK_COMMAND_MALFORMED, cmd_header);
 		LOG_ERR("Incomplete UDP MIDI command packet payload");
 		return -1;
 	}
@@ -374,6 +397,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	switch (cmd_code) {
 	case COMMAND_PING:
 		if (payload_len_words != 1) {
+			udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_MALFORMED, cmd_header);
 			LOG_ERR("Invalid payload length for PING packet");
 			return -1;
 		}
@@ -420,6 +445,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	case COMMAND_INVITATION_WITH_USER_AUTH:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
 		if (! SESSION_HAS_STATE(session, AUTHENTICATION_REQUIRED)) {
+			udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_NOT_EXPECTED, cmd_header);
 			LOG_WRN("No session to authenticate found");
 			return -1;
 		}
@@ -443,6 +470,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	case COMMAND_BYE:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
 		if (! session) {
+			udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_NOT_EXPECTED, cmd_header);
 			LOG_WRN("Receiving BYE without session");
 			return -1;
 		}
@@ -455,6 +484,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	case COMMAND_UMP_DATA:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
 		if (! SESSION_HAS_STATE(session, ESTABLISHED_SESSION)) {
+			udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_NOT_EXPECTED, cmd_header);
 			LOG_WRN("Receiving UMP data without established session");
 			return -1;
 		}
@@ -468,6 +499,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		if (payload_len_words < 1 || payload_len_words > 4) {
+			udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_MALFORMED, cmd_header);
 			SESS_LOG_ERR(session, "Invalid UMP length");
 			return -1;
 		}
@@ -477,6 +510,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		if (UMP_NUM_WORDS(ump) != payload_len_words) {
+			udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_MALFORMED, cmd_header);
 			SESS_LOG_ERR(session, "Invalid UMP payload size for its message type");
 			return -1;
 		}
@@ -490,6 +525,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
 		if (! SESSION_HAS_STATE(session, ESTABLISHED_SESSION)) {
 			LOG_WRN("Receiving session reset without established session");
+			udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_NOT_EXPECTED, cmd_header);
 			return -1;
 		}
 
@@ -502,7 +539,8 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 	default:
 		LOG_WRN("Unknown command code %02X", cmd_code);
 		net_buf_pull(rx, payload_len);
-		// TODO: send NAK "Command not supported"
+		udp_midi_quick_nak(ep, peer_addr, peer_addr_len,
+				   NAK_COMMAND_NOT_SUPPORTED, cmd_header);
 		return 0;
 	}
 	return 0;
