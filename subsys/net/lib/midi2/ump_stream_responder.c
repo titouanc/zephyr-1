@@ -9,9 +9,6 @@
 #include <zephyr/midi2/ump_stream_responder.h>
 #include <zephyr/sys/byteorder.h>
 
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(ump_stream_responder);
-
 #define BIT_IF(cond, n) ((cond) ? BIT(n) : 0)
 
 /**
@@ -153,7 +150,6 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 	uint8_t vmaj = UMP_STREAM_EP_DISCOVERY_VMAJ(pkt);
 	uint8_t vmin = UMP_STREAM_EP_DISCOVERY_VMIN(pkt);
 	uint8_t filter = UMP_STREAM_EP_DISCOVERY_FILTER(pkt);
-	LOG_DBG("Endpoint discovery ump v%d.%d filter=%02X", vmaj, vmin, filter);
 
 	/* Request for Endpoint Info Notification */
 	if (filter & UMP_EP_DISC_FILTER_EP_INFO) {
@@ -185,12 +181,10 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 	uint8_t filter = UMP_STREAM_FB_DISCOVERY_FILTER(pkt);
 
 	if (block_num >= cfg->ep_spec->n_blocks) {
-		LOG_WRN("Function block discovery block=%d does not exist", block_num);
 		return 0;
 	}
 
 	blk = &cfg->ep_spec->blocks[block_num];
-	LOG_DBG("Function block discovery block=%d filter=%02X", block_num, filter);
 
 	if (filter & UMP_FB_DISC_FILTER_INFO) {
 		cfg->send(cfg->dev, make_function_block_info(cfg->ep_spec, block_num));
