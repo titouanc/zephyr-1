@@ -8,30 +8,30 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
 
-/* See udp-ump 5.5: Command Codes and Packet Types */
-enum udp_midi_cmd {
-	COMMAND_INVITATION = 0x01,
-	COMMAND_INVITATION_WITH_AUTH = 0x02,
-	COMMAND_INVITATION_WITH_USER_AUTH = 0x03,
-	COMMAND_INVITATION_REPLY_ACCEPTED = 0x10,
-	COMMAND_INVITATION_REPLY_PENDING = 0x11,
-	COMMAND_INVITATION_REPLY_AUTH_REQUIRED = 0x12,
-	COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED = 0x13,
-	COMMAND_PING = 0x20,
-	COMMAND_PING_REPLY = 0x21,
-	COMMAND_RETRANSMIT_REQUEST = 0x80,
-	COMMAND_RETRANSMIT_ERROR = 0x81,
-	COMMAND_SESSION_RESET = 0x82,
-	COMMAND_SESSION_RESET_REPLY = 0x83,
-	COMMAND_NAK = 0x8F,
-	COMMAND_BYE = 0xF0,
-	COMMAND_BYE_REPLY = 0xF1,
-	COMMAND_UMP_DATA = 0xFF,
-};
-
 #define BUFSIZE 256
 
-NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
+/* See udp-ump 5.5: Command Codes and Packet Types */
+#define COMMAND_INVITATION				0x01
+#define COMMAND_INVITATION_WITH_AUTH			0x02
+#define COMMAND_INVITATION_WITH_USER_AUTH		0x03
+#define COMMAND_INVITATION_REPLY_ACCEPTED		0x10
+#define COMMAND_INVITATION_REPLY_PENDING		0x11
+#define COMMAND_INVITATION_REPLY_AUTH_REQUIRED		0x12
+#define COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED	0x13
+#define COMMAND_PING					0x20
+#define COMMAND_PING_REPLY				0x21
+#define COMMAND_RETRANSMIT_REQUEST			0x80
+#define COMMAND_RETRANSMIT_ERROR			0x81
+#define COMMAND_SESSION_RESET				0x82
+#define COMMAND_SESSION_RESET_REPLY			0x83
+#define COMMAND_NAK					0x8F
+#define COMMAND_BYE					0xF0
+#define COMMAND_BYE_REPLY				0xF1
+#define COMMAND_UMP_DATA				0xFF
+
+/* See udp-ump 6.4 / Table 11: Capabilities for Invitation */
+#define CLIENT_CAP_INV_WITH_AUTH	BIT(0)
+#define CLIENT_CAP_INV_WITH_USER_AUTH	BIT(1)
 
 #define SESS_LOG_DBG(_s, _fmt, ...) SESS_LOG(DBG, _s, _fmt, ##__VA_ARGS__)
 #define SESS_LOG_INF(_s, _fmt, ...) SESS_LOG(INF, _s, _fmt, ##__VA_ARGS__)
@@ -41,13 +41,16 @@ NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
 #define SESS_LOG(_lvl, _s, _fmt, ...) \
 	{ \
 		const struct sockaddr_in *__pa = (const struct sockaddr_in *) &(_s)->addr; \
-		char __pn[INET_ADDRSTRLEN]; \
-		net_addr_ntop(AF_INET, &__pa->sin_addr, __pn, sizeof(__pn)); \
+		char __pn[INET6_ADDRSTRLEN]; \
+		net_addr_ntop(__pa->sin_family, &__pa->sin_addr, __pn, sizeof(__pn)); \
 		LOG_##_lvl("%s:%d " _fmt, __pn, __pa->sin_port, ##__VA_ARGS__); \
 	}
 
 #define SESSION_HAS_STATE(session, expected_state) \
 	((session) && (session)->state == expected_state)
+
+
+NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
 
 static inline void udp_midi_free_session(struct udp_midi_session *session)
 {
