@@ -22,6 +22,7 @@
 		.addr4.sin_port = (_port) \
 	}
 
+#if CONFIG_MIDI2_UDP_HOST_AUTH
 #define UDP_MIDI_EP_DECLARE_WITH_AUTH(_name, _n_peers, _port, _secret) \
 	static struct udp_midi_session peers_of_##_name[_n_peers]; \
 	static struct udp_midi_ep _name = { \
@@ -42,6 +43,7 @@
 		.userlist = &users_of_##_name, \
 		.addr4.sin_port = (_port), \
 	}
+#endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
 
 enum udp_midi_session_state {
 	NOT_INITIALIZED = 0,
@@ -72,8 +74,10 @@ struct udp_midi_session {
 	struct sockaddr addr;
 	socklen_t addr_len;
 	const struct udp_midi_ep *ep;
+#if CONFIG_MIDI2_UDP_HOST_AUTH
 	const struct udp_midi_user *user;
 	char nonce[UDP_MIDI_NONCE_SIZE];
+#endif
 	struct net_buf *tx_buf;
 	struct k_work tx_work;
 };
@@ -92,10 +96,12 @@ struct udp_midi_ep {
 	size_t n_peers;
 	struct udp_midi_session *peers;
 	enum udp_midi_auth_type auth_type;
+#if CONFIG_MIDI2_UDP_HOST_AUTH
 	union {
 		const char *shared_auth_secret;
 		const struct udp_midi_userlist *userlist;
 	};
+#endif
 };
 
 /**
