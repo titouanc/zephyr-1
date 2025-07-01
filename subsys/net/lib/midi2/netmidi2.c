@@ -1,9 +1,7 @@
-#include "netmidi2.h"
+#include <zephyr/net/midi2.h>
 
 #include <stdio.h>
-#include <zephyr/crypto/crypto.h>
 #include <zephyr/net/socket_service.h>
-#include <zephyr/random/random.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
@@ -49,8 +47,86 @@ LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
 #define SESSION_HAS_STATE(session, expected_state) \
 	((session) && (session)->state == expected_state)
 
-
 NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
+
+#if CONFIG_MIDI2_UDP_HOST_AUTH
+#include <zephyr/crypto/crypto.h>
+#include <zephyr/random/random.h>
+
+static inline const struct udp_midi_user *udp_midi_find_user(
+	const struct udp_midi_ep *ep, const char *name, size_t namelen
+)
+{
+	if (ep->auth_type != UDP_MIDI_USER_PASSWORD) {
+		return NULL;
+	}
+
+	for (size_t i=0; i<ep->userlist->n_users; i++) {
+		if (strncmp(ep->userlist->users[i].name, name, namelen) == 0) {
+			return &ep->userlist->users[i];
+		}
+	}
+
+	return NULL;
+}
+
+static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
+					 struct net_buf_simple *buf)
+{
+	const struct device *hasher = device_get_binding(CONFIG_CRYPTO_MBEDTLS_SHIM_DRV_NAME);
+	struct hash_ctx ctx = {.flags = crypto_query_hwcaps(hasher)};
+	const uint8_t *auth_digest = buf->data;
+	const struct udp_midi_user *user;
+	uint8_t input[64];
+	uint8_t output[32];
+	size_t secret_len = strlen(sess->ep->shared_auth_secret);
+	struct hash_pkt hash = {
+		.in_buf = input,
+		.in_len = UDP_MIDI_NONCE_SIZE,
+		.out_buf = output,
+	};
+
+	/* Remove digest from buffer */
+	net_buf_simple_pull(buf, 32);
+
+	if (! hasher) {
+		LOG_ERR("mbedtls crypto pseudo-device unavailable");
+		return false;
+	}
+
+	memcpy(input, sess->nonce, UDP_MIDI_NONCE_SIZE);
+
+	if (sess->ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET) {
+		memcpy(&input[UDP_MIDI_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
+		hash.in_len += secret_len;
+	} else if (sess->ep->auth_type == UDP_MIDI_USER_PASSWORD) {
+		/* TODO: better handling of username length !
+		 * It's actually NOT always the buffer length,
+		 * as other command packets may follow */
+		user = udp_midi_find_user(sess->ep, buf->data, buf->len);
+		if (! user) {
+			LOG_ERR("No matching user found");
+			return false;
+		}
+		hash.in_len += snprintf(&input[UDP_MIDI_NONCE_SIZE],
+					sizeof(input) - UDP_MIDI_NONCE_SIZE,
+					"%s%s", user->name, user->password);
+		/* Remove username from buffer */
+		net_buf_simple_pull(buf, ROUND_UP(strlen(user->name), 4));
+	}
+
+	hash_begin_session(hasher, &ctx, CRYPTO_HASH_ALGO_SHA256);
+
+	if (hash_compute(&ctx, &hash)) {
+		SESS_LOG_ERR(sess, "Hashing error");
+		return false;
+	}
+
+	hash_free_session(hasher, &ctx);
+
+	return memcmp(hash.out_buf, auth_digest, 32) == 0;
+}
+#endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
 
 static inline void udp_midi_free_session(struct udp_midi_session *session)
 {
@@ -140,80 +216,6 @@ static inline struct udp_midi_session *udp_midi_alloc_session(
 	return res;
 }
 
-static inline const struct udp_midi_user *udp_midi_find_user(
-	const struct udp_midi_ep *ep, const char *name, size_t namelen
-)
-{
-	if (ep->auth_type != UDP_MIDI_USER_PASSWORD) {
-		return NULL;
-	}
-
-	for (size_t i=0; i<ep->userlist->n_users; i++) {
-		if (strncmp(ep->userlist->users[i].name, name, namelen) == 0) {
-			return &ep->userlist->users[i];
-		}
-	}
-
-	return NULL;
-}
-
-static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
-					 struct net_buf_simple *buf)
-{
-	const struct device *hasher = device_get_binding(CONFIG_CRYPTO_MBEDTLS_SHIM_DRV_NAME);
-	struct hash_ctx ctx = {.flags = crypto_query_hwcaps(hasher)};
-	const uint8_t *auth_digest = buf->data;
-	const struct udp_midi_user *user;
-	uint8_t input[64];
-	uint8_t output[32];
-	size_t secret_len = strlen(sess->ep->shared_auth_secret);
-	struct hash_pkt hash = {
-		.in_buf = input,
-		.in_len = UDP_MIDI_NONCE_SIZE,
-		.out_buf = output,
-	};
-
-	/* Remove digest from buffer */
-	net_buf_simple_pull(buf, 32);
-
-	if (! hasher) {
-		LOG_ERR("mbedtls crypto pseudo-device unavailable");
-		return false;
-	}
-
-	memcpy(input, sess->nonce, UDP_MIDI_NONCE_SIZE);
-
-	if (sess->ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET) {
-		memcpy(&input[UDP_MIDI_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
-		hash.in_len += secret_len;
-	} else if (sess->ep->auth_type == UDP_MIDI_USER_PASSWORD) {
-		/* TODO: better handling of username length !
-		 * It's actually NOT always the buffer length,
-		 * as other command packets may follow */
-		user = udp_midi_find_user(sess->ep, buf->data, buf->len);
-		if (! user) {
-			LOG_ERR("No matching user found");
-			return false;
-		}
-		hash.in_len += snprintf(&input[UDP_MIDI_NONCE_SIZE],
-					sizeof(input) - UDP_MIDI_NONCE_SIZE,
-					"%s%s", user->name, user->password);
-		/* Remove username from buffer */
-		net_buf_simple_pull(buf, ROUND_UP(strlen(user->name), 4));
-	}
-
-	hash_begin_session(hasher, &ctx, CRYPTO_HASH_ALGO_SHA256);
-
-	if (hash_compute(&ctx, &hash)) {
-		SESS_LOG_ERR(sess, "Hashing error");
-		return false;
-	}
-
-	hash_free_session(hasher, &ctx);
-
-	return memcmp(hash.out_buf, auth_digest, 32) == 0;
-}
-
 static void udp_midi_session_tx_work(struct k_work *work)
 {
 	struct udp_midi_session *session = CONTAINER_OF(work, struct udp_midi_session, tx_work);
@@ -277,7 +279,12 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			net_buf_simple_add_u8(tx, COMMAND_INVITATION_REPLY_ACCEPTED);
 			net_buf_simple_add_be24(tx, 0);
 			session->state = ESTABLISHED_SESSION;
-		} else {
+		}
+
+#if ! CONFIG_MIDI2_UDP_HOST_AUTH
+		return 0;
+#else
+		else {
 			/* TODO: if client has no auth caps; send BYE with reason 0x45 */
 			net_buf_simple_add_u8(tx, ep->auth_type == UDP_MIDI_AUTH_SHARED_SECRET
 						  ? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
@@ -313,6 +320,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		net_buf_simple_add_be24(tx, 0);
 		session->state = ESTABLISHED_SESSION;
 		return 0;
+#endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
 
 	case COMMAND_BYE:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
