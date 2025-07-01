@@ -4,7 +4,7 @@
 #include <zephyr/net/socket_service.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 
 #define BUFSIZE 256
 
@@ -32,8 +32,8 @@ LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
 #define CLIENT_CAP_INV_WITH_USER_AUTH	BIT(1)
 
 #define SESS_LOG_DBG(_s, _fmt, ...) SESS_LOG(DBG, _s, _fmt, ##__VA_ARGS__)
-#define SESS_LOG_INF(_s, _fmt, ...) SESS_LOG(INF, _s, _fmt, ##__VA_ARGS__)
-#define SESS_LOG_WRN(_s, _fmt, ...) SESS_LOG(WRN, _s, _fmt, ##__VA_ARGS__)
+#define SESS_LOG_INF(_s, _fmt, ...) SESS_LOG(INFO, _s, _fmt, ##__VA_ARGS__)
+#define SESS_LOG_WRN(_s, _fmt, ...) SESS_LOG(WARN, _s, _fmt, ##__VA_ARGS__)
 #define SESS_LOG_ERR(_s, _fmt, ...) SESS_LOG(ERR, _s, _fmt, ##__VA_ARGS__)
 
 #define SESS_LOG(_lvl, _s, _fmt, ...) \
@@ -41,7 +41,7 @@ LOG_MODULE_REGISTER(udp_midi, LOG_LEVEL_INF);
 		const struct sockaddr_in *__pa = (const struct sockaddr_in *) &(_s)->addr; \
 		char __pn[INET6_ADDRSTRLEN]; \
 		net_addr_ntop(__pa->sin_family, &__pa->sin_addr, __pn, sizeof(__pn)); \
-		LOG_##_lvl("%s:%d " _fmt, __pn, __pa->sin_port, ##__VA_ARGS__); \
+		NET_##_lvl("%s:%d " _fmt, __pn, __pa->sin_port, ##__VA_ARGS__); \
 	}
 
 #define SESSION_HAS_STATE(session, expected_state) \
