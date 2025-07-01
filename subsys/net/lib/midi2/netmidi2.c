@@ -71,7 +71,7 @@ static inline const struct udp_midi_user *udp_midi_find_user(
 }
 
 static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
-					 struct net_buf_simple *buf)
+					 struct net_buf *buf)
 {
 	const struct device *hasher = device_get_binding(CONFIG_CRYPTO_MBEDTLS_SHIM_DRV_NAME);
 	struct hash_ctx ctx = {.flags = crypto_query_hwcaps(hasher)};
@@ -86,13 +86,13 @@ static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
 		.out_buf = output,
 	};
 
-	/* Remove digest from buffer */
-	net_buf_simple_pull(buf, 32);
-
 	if (! hasher) {
 		LOG_ERR("mbedtls crypto pseudo-device unavailable");
 		return false;
 	}
+
+	/* Remove leading auth_digest from buffer */
+	net_buf_pull(buf, 32);
 
 	memcpy(input, sess->nonce, UDP_MIDI_NONCE_SIZE);
 
@@ -112,7 +112,7 @@ static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
 					sizeof(input) - UDP_MIDI_NONCE_SIZE,
 					"%s%s", user->name, user->password);
 		/* Remove username from buffer */
-		net_buf_simple_pull(buf, ROUND_UP(strlen(user->name), 4));
+		net_buf_pull(buf, ROUND_UP(strlen(user->name), 4));
 	}
 
 	hash_begin_session(hasher, &ctx, CRYPTO_HASH_ALGO_SHA256);
@@ -230,7 +230,7 @@ static void udp_midi_session_tx_work(struct k_work *work)
 static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 					    struct sockaddr *peer_addr,
 					    socklen_t peer_addr_len,
-					    struct net_buf_simple *rx,
+					    struct net_buf *rx,
 					    struct net_buf_simple *tx)
 {
 	struct midi_ump ump;
@@ -244,10 +244,10 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		return -1;
 	}
 
-	cmd_code = net_buf_simple_pull_u8(rx);
-	payload_len_words = net_buf_simple_pull_u8(rx);
+	cmd_code = net_buf_pull_u8(rx);
+	payload_len_words = net_buf_pull_u8(rx);
 	payload_len = 4 * payload_len_words;
-	cmd_data = net_buf_simple_pull_be16(rx);
+	cmd_data = net_buf_pull_be16(rx);
 
 	if (payload_len > rx->len) {
 		LOG_ERR("Incomplete UDP MIDI command packet payload");
@@ -264,11 +264,11 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		net_buf_simple_add_u8(tx, 1);
 		net_buf_simple_add_be16(tx, 0);
 		/* PING id */
-		net_buf_simple_add_be32(tx, net_buf_simple_pull_be32(rx));
+		net_buf_simple_add_be32(tx, net_buf_pull_be32(rx));
 		return 0;
 
 	case COMMAND_INVITATION:
-		net_buf_simple_pull(rx, payload_len);
+		net_buf_pull(rx, payload_len);
 
 		session = udp_midi_alloc_session(ep, peer_addr, peer_addr_len);
 		if (! session) {
@@ -328,7 +328,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			LOG_WRN("Receiving BYE without session");
 			return -1;
 		}
-		net_buf_simple_pull(rx, payload_len);
+		net_buf_pull(rx, payload_len);
 		net_buf_simple_add_u8(tx, COMMAND_BYE_REPLY);
 		net_buf_simple_add_be24(tx, 0);
 		udp_midi_free_session(session);
@@ -355,7 +355,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 		}
 
 		for (size_t i=0; i<payload_len_words; i++) {
-			ump.data[i] = net_buf_simple_pull_be32(rx);
+			ump.data[i] = net_buf_pull_be32(rx);
 		}
 
 		if (UMP_NUM_WORDS(ump) != payload_len_words) {
@@ -384,7 +384,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 
 	default:
 		LOG_WRN("Unknown command code %02X", cmd_code);
-		net_buf_simple_pull(rx, payload_len);
+		net_buf_pull(rx, payload_len);
 		// TODO: send NAK "Command not supported"
 		return 0;
 	}
@@ -398,29 +398,34 @@ static void udp_midi_service_handler(struct net_socket_service_event *pev)
 	struct pollfd *pfd = &pev->event;
 	struct sockaddr peer_addr;
 	socklen_t peer_addr_len = sizeof(peer_addr);
-	struct net_buf_simple *rxbuf = NET_BUF_SIMPLE(BUFSIZE);
+	struct net_buf *rxbuf;
 	struct net_buf_simple *txbuf = NET_BUF_SIMPLE(BUFSIZE);
 
-	net_buf_simple_init(rxbuf, 0);
+	rxbuf = net_buf_alloc(&udp_midi_pool, K_FOREVER);
+	if (! rxbuf) {
+		NET_ERR("Cannot allocate Rx buf");
+		return;
+	}
+
 	net_buf_simple_init(txbuf, 0);
 
 	ret = zsock_recvfrom(pfd->fd, rxbuf->data, rxbuf->size, 0,
 			     &peer_addr, &peer_addr_len);
 	if (ret < 0) {
 		LOG_ERR("Rx error: %d (%d)", ret, errno);
-		return;
+		goto end;
 	}
 	rxbuf->len = ret;
 
-	LOG_HEXDUMP_DBG(rxbuf->data, rxbuf->len, "Received UDP packet");
+	NET_HEXDUMP_DBG(rxbuf->data, rxbuf->len, "Received UDP packet");
 
 	/* Check for magic header */
 	if (rxbuf->len < 4 || memcmp(rxbuf->data, "MIDI", 4) != 0) {
 		LOG_WRN("Not a MIDI packet");
-		return;
+		goto end;
 	}
 
-	net_buf_simple_pull(rxbuf, 4);
+	net_buf_pull(rxbuf, 4);
 	net_buf_simple_add_mem(txbuf, "MIDI", 4);
 
 	/* Parse contained command packets */
@@ -437,6 +442,9 @@ static void udp_midi_service_handler(struct net_socket_service_event *pev)
 			LOG_ERR("Unable to send reply: %d", errno);
 		}
 	}
+
+	end:
+	net_buf_unref(rxbuf);
 }
 
 NET_SOCKET_SERVICE_SYNC_DEFINE_STATIC(udp_midi_service, udp_midi_service_handler, 1);
