@@ -14,13 +14,20 @@ config MIDI2_UDP_HOST
 	  - Sending/Receiving Universal MIDI packets
 	  Following "Network MIDI 2.0 (UDP) Transport Specification" v1.0
 
+if MIDI2_UDP_HOST
 config MIDI2_UDP_HOST_AUTH
 	bool "Support for authentication (shared key or user/password)"
-	depends on MIDI2_UDP_HOST
 	select MBEDTLS
 	select MBEDTLS_CIPHER_CCM_ENABLED
 	select CRYPTO
 	select CRYPTO_MBEDTLS_SHIM
+
+module=NET_MIDI2
+module-dep=NET_LOG
+module-str=Log level for network MIDI2
+module-help=Enables midi2 debug messages.
+source "subsys/net/Kconfig.template.log_config.net"
+endif
 
 config MIDI2_UMP_STREAM_RESPONDER
 	bool "MIDI2 UMP Stream responder"
