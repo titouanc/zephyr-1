@@ -12,8 +12,7 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/posix/poll.h>
 
-#define CLIENT_CAP_INV_WITH_AUTH	BIT(0)
-#define CLIENT_CAP_INV_WITH_USER_AUTH	BIT(1)
+#define UDP_MIDI_NONCE_SIZE 16
 
 #define UDP_MIDI_EP_DECLARE_NO_AUTH(_name, _n_peers, _port) \
 	static struct udp_midi_session peers_of_##_name[_n_peers]; \
@@ -55,8 +54,6 @@ enum udp_midi_session_state {
 };
 
 struct udp_midi_ep;
-
-#define UDP_MIDI_NONCE_SIZE 16
 
 struct udp_midi_user {
 	const char *name;
@@ -101,6 +98,11 @@ struct udp_midi_ep {
 	};
 };
 
+/**
+ * @brief      Initialize a network (UDP) Universal MIDI Packet endpoint
+ * @param      ep    The network endpoint to initializer
+ * @return     0 on success, -errno on error
+ */
 int udp_midi_ep_init(struct udp_midi_ep *ep);
 
 /**
