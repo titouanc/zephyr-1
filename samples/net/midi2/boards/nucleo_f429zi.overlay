@@ -1,0 +1,22 @@
+#include "../app.overlay"
+
+/ {
+	aliases {
+		midi-tx-uart = &arduino_serial;
+		midi-tx-led = &midi_green_led;
+	};
+
+	leds {
+		midi_green_led: midi-green-led {
+			gpios = <&arduino_header 13 GPIO_ACTIVE_HIGH>;
+		};
+
+		midi_red_led: midi-red-led {
+			gpios = <&arduino_header 12 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+
+&arduino_serial {
+	current-speed = <31250>;
+};
