@@ -8,7 +8,7 @@
  * @brief      UMP Function Block specification
  */
 struct ump_block_dt_spec {
-	/** Name of this function block */
+	/** Name of this function block, or NULL if unnamed */
 	const char *name;
 	/** Number of the first UMP group in this block */
 	uint8_t first_group;
@@ -31,7 +31,7 @@ struct ump_block_dt_spec {
  * @brief      UMP endpoint specification
  */
 struct ump_endpoint_dt_spec {
-	/** Name of this endpoint */
+	/** Name of this endpoint, or NULL if unnamed */
 	const char *name;
 	/** Number of function blocks in this endpoint */
 	size_t n_blocks;
@@ -58,7 +58,7 @@ struct ump_stream_responder_cfg {
  */
 #define UMP_BLOCK_DT_SPEC_GET(_node)					   \
 {									   \
-	.name = DT_PROP_OR(_node, label, DT_NODE_FULL_NAME(_node)),	   \
+	.name = DT_PROP_OR(_node, label, NULL),				   \
 	.first_group = DT_REG_ADDR(_node),				   \
 	.groups_spanned = DT_REG_SIZE(_node),				   \
 	.is_input = !DT_ENUM_HAS_VALUE(_node, terminal_type, output_only), \
@@ -67,19 +67,21 @@ struct ump_stream_responder_cfg {
 	.is_31250bps = DT_PROP(_node, serial_31250bps),			   \
 }
 
-#define UMP_BLOCK_SEP_IF_OKAY(_node) \
-	COND_CODE_1(DT_NODE_HAS_STATUS_OKAY(_node), (UMP_BLOCK_DT_SPEC_GET(_node),), ())
+#define UMP_BLOCK_SEP_IF_OKAY(_node)			\
+	COND_CODE_1(DT_NODE_HAS_STATUS_OKAY(_node),	\
+		    (UMP_BLOCK_DT_SPEC_GET(_node),),	\
+		    ())
 
 /**
  * @brief      Get a Universal MIDI Packet endpoint description from
  *             the device-tree representation of a midi2 device
  * @param      _node  The device tree node representing a midi2 device
  */
-#define UMP_ENDPOINT_DT_SPEC_GET(_node) \
-{ \
-	.name = DT_PROP_OR(_node, label, DT_NODE_FULL_NAME(_node)), \
+#define UMP_ENDPOINT_DT_SPEC_GET(_node)					       \
+{									       \
+	.name = DT_PROP_OR(_node, label, NULL),				       \
 	.n_blocks = DT_FOREACH_CHILD_SEP(_node, DT_NODE_HAS_STATUS_OKAY, (+)), \
-	.blocks = {DT_FOREACH_CHILD(_node, UMP_BLOCK_SEP_IF_OKAY)}, \
+	.blocks = {DT_FOREACH_CHILD(_node, UMP_BLOCK_SEP_IF_OKAY)}, 	       \
 }
 
 /**

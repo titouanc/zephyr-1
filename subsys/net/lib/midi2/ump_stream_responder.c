@@ -158,7 +158,7 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 	}
 
 	/* Request for Endpoint Name Notification */
-	if (filter & UMP_EP_DISC_FILTER_EP_NAME) {
+	if (filter & UMP_EP_DISC_FILTER_EP_NAME && cfg->ep_spec->name) {
 		res += send_string(cfg, cfg->ep_spec->name,
 				   UMP_STREAM_STATUS_EP_NAME << 16, 2);
 	}
@@ -191,7 +191,7 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 		res++;
 	}
 
-	if (filter & UMP_FB_DISC_FILTER_NAME) {
+	if (filter & UMP_FB_DISC_FILTER_NAME && blk->name) {
 		res += send_string(cfg, blk->name,
 				   (UMP_STREAM_STATUS_FB_NAME << 16) | (block_num << 8), 3);
 	}
