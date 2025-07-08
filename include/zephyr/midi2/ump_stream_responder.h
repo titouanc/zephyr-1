@@ -93,4 +93,10 @@ struct ump_stream_responder_cfg {
 int ump_stream_respond(const struct ump_stream_responder_cfg *cfg,
 		       const struct midi_ump pkt);
 
+/**
+ * @return     The UMP Product Instance ID of this device, based on the device
+ *             hwinfo if available, otherwise an empty string
+ */
+const char *ump_product_instance_id();
+
 #endif
