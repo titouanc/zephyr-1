@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/midi2/ump_stream_responder.h>
 #include <zephyr/sys/byteorder.h>
 
@@ -158,9 +159,16 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 	}
 
 	/* Request for Endpoint Name Notification */
-	if (filter & UMP_EP_DISC_FILTER_EP_NAME && cfg->ep_spec->name) {
+	if ((filter & UMP_EP_DISC_FILTER_EP_NAME) && cfg->ep_spec->name) {
 		res += send_string(cfg, cfg->ep_spec->name,
 				   UMP_STREAM_STATUS_EP_NAME << 16, 2);
+	}
+
+	/* Request for Product Instance ID */
+	if ((filter & UMP_EP_DISC_FILTER_PRODUCT_ID) && IS_ENABLED(CONFIG_HWINFO)) {
+		printk("PRODID: '%s'\n", ump_product_instance_id());
+		res += send_string(cfg, ump_product_instance_id(),
+				   UMP_STREAM_STATUS_PROD_ID << 16, 2);
 	}
 
 	return res;
@@ -191,12 +199,38 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 		res++;
 	}
 
-	if (filter & UMP_FB_DISC_FILTER_NAME && blk->name) {
+	if ((filter & UMP_FB_DISC_FILTER_NAME) && blk->name) {
 		res += send_string(cfg, blk->name,
 				   (UMP_STREAM_STATUS_FB_NAME << 16) | (block_num << 8), 3);
 	}
 
 	return res;
+}
+
+const char *ump_product_instance_id()
+{
+	static char product_id[43] = "";
+	static const char hex[] = "0123456789ABCDEF";
+
+	if (IS_ENABLED(CONFIG_HWINFO) && !product_id[0]) {
+		uint8_t devid[sizeof(product_id) / 2];
+		ssize_t len = hwinfo_get_device_id(devid, sizeof(devid));
+
+		if (len == -ENOSYS && hwinfo_get_device_eui64(devid) == 0) {
+			len = 8;
+		}
+
+		for (ssize_t i=0; i<len; i++) {
+			product_id[2*i] = hex[devid[i] >> 4];
+			product_id[2*i+1] = hex[devid[i] & 0xf];
+		}
+
+		if (len >= 0) {
+			product_id[2*len] = '\0';
+		}
+	}
+
+	return product_id;
 }
 
 int ump_stream_respond(const struct ump_stream_responder_cfg *cfg,
