@@ -52,7 +52,7 @@ struct ump_stream_responder_cfg {
 };
 
 /**
- * @brief      Get a Universal MIDI Packet endpoint block from its
+ * @brief      Get a Universal MIDI Packet endpoint function block from its
  *             device-tree representation
  * @param      _node  The device tree node representing the midi2 block
  */
@@ -88,7 +88,8 @@ struct ump_stream_responder_cfg {
  * @brief      Respond to an UMP Stream packet
  * @param[in]  cfg   The responder configuration
  * @param[in]  pkt   The packet to respond to
- * @return     The number of UMP packets sent as reply
+ * @return     The number of UMP packets sent as reply,
+ *             or -errno in case of error
  */
 int ump_stream_respond(const struct ump_stream_responder_cfg *cfg,
 		       const struct midi_ump pkt);

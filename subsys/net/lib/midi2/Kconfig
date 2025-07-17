@@ -9,7 +9,7 @@ config MIDI2_UDP_HOST
 	help
 	  Host library of User Datagram Protocol for Universal MIDI Packets.
 	  Provides the following features:
-	  - Exposing UMP endpoint exposed on UDP socket
+	  - Exposing an UMP endpoint over UDP
 	  - Accepting inbound client invitations
 	  - Sending/Receiving Universal MIDI packets
 	  Following "Network MIDI 2.0 (UDP) Transport Specification" v1.0
