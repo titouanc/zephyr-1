@@ -7,8 +7,9 @@
 #include <string.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/hwinfo.h>
-#include <zephyr/midi2/ump_stream_responder.h>
 #include <zephyr/sys/byteorder.h>
+
+#include "ump_stream_responder.h"
 
 #define BIT_IF(cond, n) ((cond) ? BIT(n) : 0)
 

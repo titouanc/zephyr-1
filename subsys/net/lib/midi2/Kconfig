@@ -28,10 +28,3 @@ module-str=Log level for network MIDI2
 module-help=Enables midi2 debug messages.
 source "subsys/net/Kconfig.template.log_config.net"
 endif
-
-config MIDI2_UMP_STREAM_RESPONDER
-	bool "MIDI2 UMP Stream responder"
-	help
-	  Library to respond to UMP Stream discovery messages, as specified
-	  in "Universal MIDI Packet (UMP) Format and MIDI 2.0 Protocol"
-	  version 1.1.2 section 7.1: "UMP Stream Messages"
