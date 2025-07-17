@@ -175,6 +175,25 @@ static inline int ump_ep_discover(const struct ump_stream_responder_cfg *cfg,
 	return res;
 }
 
+static inline int ump_fb_discover_block(const struct ump_stream_responder_cfg *cfg,
+					size_t block_num, uint8_t filter)
+{
+	int res = 0;
+	const struct ump_block_dt_spec *blk = &cfg->ep_spec->blocks[block_num];
+
+	if (filter & UMP_FB_DISC_FILTER_INFO) {
+		cfg->send(cfg->dev, make_function_block_info(cfg->ep_spec, block_num));
+		res++;
+	}
+
+	if ((filter & UMP_FB_DISC_FILTER_NAME) && blk->name) {
+		res += send_string(cfg, blk->name,
+				   (UMP_STREAM_STATUS_FB_NAME << 16) | (block_num << 8), 3);
+	}
+
+	return res;
+}
+
 /**
  * @brief      Handle Function Block Discovery messages
  * @param[in]  cfg   The responder configuration
@@ -189,20 +208,13 @@ static inline int ump_fb_discover(const struct ump_stream_responder_cfg *cfg,
 	uint8_t block_num = UMP_STREAM_FB_DISCOVERY_NUM(pkt);
 	uint8_t filter = UMP_STREAM_FB_DISCOVERY_FILTER(pkt);
 
-	if (block_num >= cfg->ep_spec->n_blocks) {
-		return 0;
-	}
-
-	blk = &cfg->ep_spec->blocks[block_num];
-
-	if (filter & UMP_FB_DISC_FILTER_INFO) {
-		cfg->send(cfg->dev, make_function_block_info(cfg->ep_spec, block_num));
-		res++;
-	}
-
-	if ((filter & UMP_FB_DISC_FILTER_NAME) && blk->name) {
-		res += send_string(cfg, blk->name,
-				   (UMP_STREAM_STATUS_FB_NAME << 16) | (block_num << 8), 3);
+	if (block_num < cfg->ep_spec->n_blocks) {
+		res += ump_fb_discover_block(cfg, block_num, filter);
+	} else if (block_num == 0xff) {
+		/* Requesting information for all blocks at once */
+		for (block_num=0; block_num<cfg->ep_spec->n_blocks; block_num++) {
+			res += ump_fb_discover_block(cfg, block_num, filter);
+		}
 	}
 
 	return res;
