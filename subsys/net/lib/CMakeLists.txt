@@ -21,6 +21,10 @@ add_subdirectory_ifdef(CONFIG_NET_DHCPV6             dhcpv6)
 add_subdirectory_ifdef(CONFIG_PROMETHEUS             prometheus)
 add_subdirectory_ifdef(CONFIG_WIFI_CREDENTIALS       wifi_credentials)
 
+if (CONFIG_MIDI2_UDP_HOST OR CONFIG_MIDI2_UMP_STREAM_RESPONDER)
+  add_subdirectory(midi2)
+endif()
+
 if (CONFIG_NET_DHCPV4 OR CONFIG_NET_DHCPV4_SERVER)
   add_subdirectory(dhcpv4)
 endif()
