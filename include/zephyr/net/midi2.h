@@ -81,7 +81,7 @@ struct netmidi2_session {
 	/** Length of the peer's remote address */
 	socklen_t addr_len;
 	/** The Network MIDI2 endpoint to which this session belongs */
-	const struct netmidi2_ep *ep;
+	struct netmidi2_ep *ep;
 #if CONFIG_NETMIDI2_HOST_AUTH
 	/** The username to which this session belongs */
 	const struct netmidi2_user *user;

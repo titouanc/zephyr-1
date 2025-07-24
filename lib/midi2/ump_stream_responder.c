@@ -107,8 +107,7 @@ static inline size_t fill_str(struct midi_ump *ump, size_t offset,
  * @return	 The number of packets sent
  */
 static inline int send_string(const struct ump_stream_responder_cfg *cfg,
-				  const char *string,
-				  uint32_t prefix, size_t offset)
+			      const char *string, uint32_t prefix, size_t offset)
 {
 	struct midi_ump reply;
 	size_t stringlen = strlen(string);

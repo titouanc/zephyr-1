@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <zephyr/net/socket_service.h>
 
+#if CONFIG_MIDI2_UMP_STREAM_RESPONDER
+#include <ump_stream_responder.h>
+#endif
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 
@@ -238,6 +242,26 @@ static void netmidi2_session_tx_work(struct k_work *work)
 	net_buf_unref(buf);
 }
 
+static inline const char *netmidi2_ep_get_name(struct netmidi2_ep *ep)
+{
+	if (ep->name == NULL) {
+		ep->name = "";
+	}
+	return ep->name;
+}
+
+static inline const char *netmidi2_ep_get_piid(struct netmidi2_ep *ep)
+{
+	if (ep->piid == NULL) {
+#if CONFIG_MIDI2_UMP_STREAM_RESPONDER
+		ep->piid = ump_product_instance_id();
+#else
+		ep->piid = "";
+#endif
+	}
+	return ep->piid;
+}
+
 /**
  * @brief      Write the header for a CommandPacket into a session tx buffer
  * @param      sess                   The peer's session
@@ -363,7 +387,7 @@ static int netmidi2_session_sendcmd_bytes(struct netmidi2_session *sess,
  * @param[in]  payload                The command payload
  * @param[in]  payload_len_words      Payload length, in words (4B)
  */
-static inline int netmidi2_quick_reply(const struct netmidi2_ep *ep,
+static inline int netmidi2_quick_reply(struct netmidi2_ep *ep,
 				       const struct sockaddr *peer_addr,
 				       const socklen_t peer_addr_len,
 				       const uint8_t command_code,
@@ -398,11 +422,11 @@ static inline int netmidi2_quick_reply(const struct netmidi2_ep *ep,
  * @param[in]  nak_reason       The NAK reason
  * @param[in]  nakd_cmd_header  The command packet header this NAK is replying to
  */
-static inline int netmidi2_quick_nak(const struct netmidi2_ep *ep,
-				       const struct sockaddr *peer_addr,
-				       const socklen_t peer_addr_len,
-				       const uint8_t nak_reason,
-			               const uint32_t nakd_cmd_header)
+static inline int netmidi2_quick_nak(struct netmidi2_ep *ep,
+				     const struct sockaddr *peer_addr,
+				     const socklen_t peer_addr_len,
+				     const uint8_t nak_reason,
+				     const uint32_t nakd_cmd_header)
 {
 	return netmidi2_quick_reply(ep, peer_addr, peer_addr_len,
 				    COMMAND_NAK, nak_reason << 8,
@@ -423,8 +447,8 @@ static int netmidi2_send_invitation_reply(struct netmidi2_session *session)
 	int ret;
 	uint8_t command_code;
 
-	const char *name = session->ep->name ? session->ep->name : "";
-	const char *piid = session->ep->piid ? session->ep->piid : "";
+	const char *name = netmidi2_ep_get_name(session->ep);
+	const char *piid = netmidi2_ep_get_piid(session->ep);
 	const size_t namelen = strlen(name);
 	const size_t piidlen = strlen(piid);
 	const size_t nonce_words = DIV_ROUND_UP(NETMIDI2_NONCE_SIZE, 4);
@@ -502,12 +526,14 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 
 	switch (cmd_code) {
 	case COMMAND_PING:
+		/* See netmidi10: 6.13 Ping */
 		if (payload_len_words != 1) {
 			netmidi2_quick_nak(ep, peer_addr, peer_addr_len,
 					   NAK_COMMAND_MALFORMED, cmd_header);
 			LOG_ERR("Invalid payload length for PING packet");
 			return -1;
 		}
+		/* Simple reply with 1 word from the PING request */
 		netmidi2_quick_reply(ep, peer_addr, peer_addr_len,
 				     COMMAND_PING_REPLY, 0,
 				     (uint32_t [1]) {net_buf_pull_be32(rx)}, 1);
