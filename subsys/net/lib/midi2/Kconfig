@@ -1,8 +1,8 @@
 # Copyright (c) 2025 Titouan Christophe
 # SPDX-License-Identifier: Apache-2.0
 
-config MIDI2_UDP_HOST
-	bool "MIDI2 UDP host [EXPERIMENTAL]"
+config NETMIDI2_HOST
+	bool "Network MIDI2 (UDP) host [EXPERIMENTAL]"
 	select NET_SOCKETS
 	select NET_IPV4
 	select NET_UDP
@@ -14,12 +14,12 @@ config MIDI2_UDP_HOST
 	  - Sending/Receiving Universal MIDI packets
 	  Following "Network MIDI 2.0 (UDP) Transport Specification" v1.0
 
-if MIDI2_UDP_HOST
-config MIDI2_UDP_HOST_MAX_CLIENTS
-	int "Maximum number of clients supported by the MIDI2 host"
+if NETMIDI2_HOST
+config NETMIDI2_HOST_MAX_CLIENTS
+	int "Maximum number of clients supported by the Network MIDI2 host"
 	default 5
 
-config MIDI2_UDP_HOST_AUTH
+config NETMIDI2_HOST_AUTH
 	bool "Support for authentication (shared key or user/password)"
 	select MBEDTLS
 	select MBEDTLS_CIPHER_CCM_ENABLED

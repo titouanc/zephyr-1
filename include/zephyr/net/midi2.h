@@ -20,7 +20,7 @@
 		.auth_type = UDP_MIDI_AUTH_NONE, \
 	}
 
-#if CONFIG_MIDI2_UDP_HOST_AUTH
+#if CONFIG_NETMIDI2_HOST_AUTH
 #define UDP_MIDI_EP_DECLARE_WITH_AUTH(_name, _port, _secret) \
 	static struct udp_midi_ep _name = { \
 		.addr4.sin_port = (_port), \
@@ -38,7 +38,7 @@
 		.auth_type = UDP_MIDI_USER_PASSWORD, \
 		.userlist = &users_of_##_name, \
 	}
-#endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
+#endif /* CONFIG_NETMIDI2_HOST_AUTH */
 
 enum udp_midi_session_state {
 	NOT_INITIALIZED = 0,
@@ -69,7 +69,7 @@ struct udp_midi_session {
 	struct sockaddr addr;
 	socklen_t addr_len;
 	const struct udp_midi_ep *ep;
-#if CONFIG_MIDI2_UDP_HOST_AUTH
+#if CONFIG_NETMIDI2_HOST_AUTH
 	const struct udp_midi_user *user;
 	char nonce[UDP_MIDI_NONCE_SIZE];
 #endif
@@ -88,9 +88,9 @@ struct udp_midi_ep {
 	struct pollfd pollsock;
 	void (*rx_packet_cb)(struct udp_midi_session *session,
 			     const struct midi_ump ump);
-	struct udp_midi_session peers[CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS];
+	struct udp_midi_session peers[CONFIG_NETMIDI2_HOST_MAX_CLIENTS];
 	enum udp_midi_auth_type auth_type;
-#if CONFIG_MIDI2_UDP_HOST_AUTH
+#if CONFIG_NETMIDI2_HOST_AUTH
 	union {
 		const char *shared_auth_secret;
 		const struct udp_midi_userlist *userlist;

@@ -56,7 +56,7 @@ LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 
 NET_BUF_POOL_DEFINE(udp_midi_pool, 10, BUFSIZE, 0, NULL);
 
-#if CONFIG_MIDI2_UDP_HOST_AUTH
+#if CONFIG_NETMIDI2_HOST_AUTH
 #include <zephyr/crypto/crypto.h>
 #include <zephyr/random/random.h>
 
@@ -133,7 +133,7 @@ static bool udp_midi_auth_session(const struct udp_midi_session *sess,
 
 	return memcmp(hash.out_buf, auth_digest, 32) == 0;
 }
-#endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
+#endif /* CONFIG_NETMIDI2_HOST_AUTH */
 
 static inline void udp_midi_free_session(struct udp_midi_session *session)
 {
@@ -152,7 +152,7 @@ static inline struct udp_midi_session *udp_midi_match_session(
 	socklen_t peer_addr_len
 )
 {
-	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
+	for (size_t i=0; i<CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
 		if (
 			ep->peers[i].addr_len == peer_addr_len &&
 			memcmp(&ep->peers[i].addr, peer_addr, peer_addr_len) == 0
@@ -170,7 +170,7 @@ static inline void udp_midi_free_inactive_sessions(struct udp_midi_ep *ep)
 	struct udp_midi_session *sess;
 	const uint8_t bye_timeout[] = {COMMAND_BYE, 0, 0x04, 0};
 
-	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
+	for (size_t i=0; i<CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
 		sess = &ep->peers[i];
 		if (! SESSION_HAS_STATE(sess, ESTABLISHED_SESSION)) {
 			SESS_LOG_WRN(sess, "Cleanup inactive session");
@@ -189,7 +189,7 @@ static inline struct udp_midi_session *udp_midi_try_alloc_session(
 {
 	struct udp_midi_session *sess;
 
-	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
+	for (size_t i=0; i<CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
 		sess = &ep->peers[i];
 		if (sess->state == NOT_INITIALIZED) {
 			sess->state = IDLE;
@@ -421,7 +421,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 			session->state = ESTABLISHED_SESSION;
 		}
 
-#if ! CONFIG_MIDI2_UDP_HOST_AUTH
+#if ! CONFIG_NETMIDI2_HOST_AUTH
 		return 0;
 #else
 		else {
@@ -465,7 +465,7 @@ static int udp_midi_dispatch_command_packet(struct udp_midi_ep *ep,
 					 0, NULL, 0);
 		session->state = ESTABLISHED_SESSION;
 		return 0;
-#endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
+#endif /* CONFIG_NETMIDI2_HOST_AUTH */
 
 	case COMMAND_BYE:
 		session = udp_midi_match_session(ep, peer_addr, peer_addr_len);
@@ -595,7 +595,7 @@ int udp_midi_ep_init(struct udp_midi_ep *ep)
 {
 	int ret;
 	int sock;
-	memset(ep->peers, 0, CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS * sizeof(ep->peers[0]));
+	memset(ep->peers, 0, CONFIG_NETMIDI2_HOST_MAX_CLIENTS * sizeof(ep->peers[0]));
 	memset(&ep->addr4, 0, sizeof(ep->addr4));
 	ep->addr4.sin_family = AF_INET;
 
@@ -612,7 +612,7 @@ int udp_midi_ep_init(struct udp_midi_ep *ep)
 		return -EIO;
 	}
 
-	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
+	for (size_t i=0; i<CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
 		k_work_init(&ep->peers[i].tx_work, udp_midi_session_tx_work);
 	}
 
@@ -631,7 +631,7 @@ int udp_midi_ep_init(struct udp_midi_ep *ep)
 
 void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump)
 {
-	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
+	for (size_t i=0; i<CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
 		if (ep->peers[i].state == ESTABLISHED_SESSION){
 			udp_midi_send(&ep->peers[i], ump);
 		}
