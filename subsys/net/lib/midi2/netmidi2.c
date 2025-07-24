@@ -10,7 +10,12 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 
-#define BUFSIZE 256
+#define NETMIDI2_BUFSIZE 256
+
+/**
+ * Size, in bytes, of the digest sent by the client to authenticate
+ */
+#define NETMIDI2_DIGEST_SIZE 32
 
 /* See netmidi10: 5.5: Command Codes and Packet Types */
 #define COMMAND_INVITATION				0x01
@@ -58,7 +63,8 @@ LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 #define SESSION_HAS_STATE(session, expected_state) \
 	((session) && (session)->state == expected_state)
 
-NET_BUF_POOL_DEFINE(netmidi2_pool, 2 + CONFIG_NETMIDI2_HOST_MAX_CLIENTS, BUFSIZE, 0, NULL);
+NET_BUF_POOL_DEFINE(netmidi2_pool, 2 + CONFIG_NETMIDI2_HOST_MAX_CLIENTS,
+	            NETMIDI2_BUFSIZE, 0, NULL);
 
 #if CONFIG_NETMIDI2_HOST_AUTH
 #include <zephyr/crypto/crypto.h>
@@ -82,14 +88,14 @@ static inline const struct netmidi2_user *netmidi2_find_user(
 }
 
 static bool netmidi2_auth_session(const struct netmidi2_session *sess,
-				  struct net_buf *buf)
+				  struct net_buf *buf, size_t payload_len)
 {
 	const struct device *hasher = device_get_binding(CONFIG_CRYPTO_MBEDTLS_SHIM_DRV_NAME);
 	struct hash_ctx ctx = {.flags = crypto_query_hwcaps(hasher)};
 	const uint8_t *auth_digest = buf->data;
 	const struct netmidi2_user *user;
 	uint8_t input[64];
-	uint8_t output[32];
+	uint8_t output[NETMIDI2_DIGEST_SIZE];
 	size_t secret_len = strlen(sess->ep->shared_auth_secret);
 	struct hash_pkt hash = {
 		.in_buf = input,
@@ -102,30 +108,38 @@ static bool netmidi2_auth_session(const struct netmidi2_session *sess,
 		return false;
 	}
 
-	/* Remove leading auth_digest from buffer */
-	net_buf_pull(buf, 32);
+	if (buf->len < NETMIDI2_DIGEST_SIZE || payload_len < NETMIDI2_DIGEST_SIZE) {
+		LOG_ERR("Incomplete authentication digest");
+		return false;
+	}
 
+	/* Remove authentication digest from the buffer */
+	net_buf_pull(buf, NETMIDI2_DIGEST_SIZE);
+
+	/* Start the text with the authentication nonce */
 	memcpy(input, sess->nonce, NETMIDI2_NONCE_SIZE);
 
 	if (sess->ep->auth_type == NETMIDI2_AUTH_SHARED_SECRET) {
+		/* Add shared key to text */
 		memcpy(&input[NETMIDI2_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
 		hash.in_len += secret_len;
 	} else if (sess->ep->auth_type == NETMIDI2_AUTH_USER_PASSWORD) {
-		/* TODO: better handling of username length !
-		 * It's actually NOT always the buffer length,
-		 * as other command packets may follow */
-		user = netmidi2_find_user(sess->ep, buf->data, buf->len);
+		user = netmidi2_find_user(sess->ep, buf->data,
+					  payload_len - NETMIDI2_DIGEST_SIZE);
 		if (! user) {
 			LOG_ERR("No matching user found");
 			return false;
 		}
+
+		/* Add user/password to text */
 		hash.in_len += snprintf(&input[NETMIDI2_NONCE_SIZE],
 					sizeof(input) - NETMIDI2_NONCE_SIZE,
 					"%s%s", user->name, user->password);
 		/* Remove username from buffer */
-		net_buf_pull(buf, ROUND_UP(strlen(user->name), 4));
+		net_buf_pull(buf, payload_len - NETMIDI2_DIGEST_SIZE);
 	}
 
+	/* Hash text and compare to authentication digest */
 	hash_begin_session(hasher, &ctx, CRYPTO_HASH_ALGO_SHA256);
 
 	if (hash_compute(&ctx, &hash)) {
@@ -540,6 +554,10 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 		return 0;
 
 	case COMMAND_INVITATION:
+		/* See netmidi10: 6.13 Ping
+		 * We currently don't care about the peer's name or product
+		 * instance id. Simply pull the entire payload at once.
+		 */
 		net_buf_pull(rx, payload_len);
 
 		session = netmidi2_alloc_session(ep, peer_addr, peer_addr_len);
@@ -566,6 +584,7 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 
 	case COMMAND_INVITATION_WITH_AUTH:
 	case COMMAND_INVITATION_WITH_USER_AUTH:
+		/* See netmidi10: 6.9 - 6.10 Invitation with (User) Authentication */
 		session = netmidi2_match_session(ep, peer_addr, peer_addr_len);
 		if (! SESSION_HAS_STATE(session, AUTHENTICATION_REQUIRED)) {
 			netmidi2_quick_nak(ep, peer_addr, peer_addr_len,
@@ -574,12 +593,7 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 			return -1;
 		}
 
-		if (payload_len_words < 8) {
-			SESS_LOG_WRN(session, "Invalid auth digest length");
-			return -1;
-		}
-
-		if (! netmidi2_auth_session(session, rx)) {
+		if (! netmidi2_auth_session(session, rx, payload_len)) {
 			SESS_LOG_WRN(session, "Invalid auth digest");
 			return -1;
 		}

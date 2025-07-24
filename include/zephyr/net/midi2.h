@@ -12,7 +12,10 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/posix/poll.h>
 
-#define NETMIDI2_NONCE_SIZE 16
+/**
+ * Size, in bytes, of the nonce sent to the client for authentication
+ */
+#define NETMIDI2_NONCE_SIZE  16
 
 #define NETMIDI2_EP_DECLARE(_var_name, _ep_name, _piid, _port) \
 	static struct netmidi2_ep _var_name = { \
