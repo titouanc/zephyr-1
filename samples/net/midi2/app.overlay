@@ -25,7 +25,7 @@
 			label = "Keyboard";
 		};
 
-		midi1@9 {
+		ext_midi_out: midi1@9 {
 			reg = <9 1>;
 			protocol = "midi1-up-to-64b";
 			terminal-type = "output-only";

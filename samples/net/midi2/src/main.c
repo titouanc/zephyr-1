@@ -41,6 +41,11 @@ static const struct device *const uart_dev =
 
 static inline void send_external_midi1(const struct midi_ump ump)
 {
+	/* Only send MIDI events aimed at the external output */
+	if (UMP_GROUP(ump) != DT_REG_ADDR(DT_NODELABEL(ext_midi_out))) {
+		return;
+	}
+
 	switch (UMP_MIDI_COMMAND(ump)) {
 	case UMP_MIDI_PROGRAM_CHANGE:
 		SET_LED(1);
