@@ -73,18 +73,18 @@ static inline void send_external_midi1(const struct midi_ump ump)
 static const struct ump_endpoint_dt_spec ump_ep_dt =
 	UMP_ENDPOINT_DT_SPEC_GET(DT_NODELABEL(midi2));
 
-static inline void handle_ump_stream(struct udp_midi_session *session,
+static inline void handle_ump_stream(struct netmidi2_session *session,
 				     const struct midi_ump ump)
 {
 	const struct ump_stream_responder_cfg responder_cfg = {
 		.dev = session,
-		.send = (void (*)(void *, const struct midi_ump)) udp_midi_send,
+		.send = (void (*)(void *, const struct midi_ump)) netmidi2_send,
 		.ep_spec = &ump_ep_dt,
 	};
 	ump_stream_respond(&responder_cfg, ump);
 }
 
-static void netmidi2_callback(struct udp_midi_session *session,
+static void netmidi2_callback(struct netmidi2_session *session,
 			      const struct midi_ump ump)
 {
 	switch (UMP_MT(ump)) {
@@ -99,16 +99,16 @@ static void netmidi2_callback(struct udp_midi_session *session,
 
 #if CONFIG_NET_SAMPLE_MIDI2_AUTH_NONE
 
-UDP_MIDI_EP_DECLARE_NO_AUTH(midi_server, 0);
+NETMIDI2_EP_DECLARE_NO_AUTH(midi_server, 0);
 
 #elif CONFIG_NET_SAMPLE_MIDI2_AUTH_SHARED_SECRET
 
-UDP_MIDI_EP_DECLARE_WITH_AUTH(midi_server, 0,
+NETMIDI2_EP_DECLARE_WITH_AUTH(midi_server, 0,
 	CONFIG_NET_SAMPLE_MIDI2_SHARED_SECRET);
 
 #elif CONFIG_NET_SAMPLE_MIDI2_AUTH_USER_PASSWORD
 
-UDP_MIDI_EP_DECLARE_WITH_USERS(midi_server, 0,
+NETMIDI2_EP_DECLARE_WITH_USERS(midi_server, 0,
 	{.name = CONFIG_NET_SAMPLE_MIDI2_USERNAME1,
 	 .password = CONFIG_NET_SAMPLE_MIDI2_PASSWORD1},
 	{.name = CONFIG_NET_SAMPLE_MIDI2_USERNAME2,
@@ -125,7 +125,7 @@ int main(void)
 	CONFIGURE_LED();
 
 	midi_server.rx_packet_cb = netmidi2_callback;
-	udp_midi_ep_init(&midi_server);
+	netmidi2_ep_init(&midi_server);
 
 	return 0;
 }
