@@ -14,34 +14,29 @@
 
 #define UDP_MIDI_NONCE_SIZE 16
 
-#define UDP_MIDI_EP_DECLARE_NO_AUTH(_name, _n_peers, _port) \
-	static struct udp_midi_session peers_of_##_name[_n_peers]; \
+#define UDP_MIDI_EP_DECLARE_NO_AUTH(_name, _port) \
 	static struct udp_midi_ep _name = { \
-		.n_peers = _n_peers, .peers = peers_of_##_name, \
+		.addr4.sin_port = (_port), \
 		.auth_type = UDP_MIDI_AUTH_NONE, \
-		.addr4.sin_port = (_port) \
 	}
 
 #if CONFIG_MIDI2_UDP_HOST_AUTH
-#define UDP_MIDI_EP_DECLARE_WITH_AUTH(_name, _n_peers, _port, _secret) \
-	static struct udp_midi_session peers_of_##_name[_n_peers]; \
+#define UDP_MIDI_EP_DECLARE_WITH_AUTH(_name, _port, _secret) \
 	static struct udp_midi_ep _name = { \
-		.n_peers = (_n_peers), .peers = peers_of_##_name, \
+		.addr4.sin_port = (_port), \
 		.auth_type = UDP_MIDI_AUTH_SHARED_SECRET, \
-		.shared_auth_secret = (_secret), .addr4.sin_port = (_port) \
+		.shared_auth_secret = (_secret), \
 	}
 
-#define UDP_MIDI_EP_DECLARE_WITH_USERS(_name, _n_peers, _port, ...) \
-	static struct udp_midi_session peers_of_##_name[_n_peers]; \
+#define UDP_MIDI_EP_DECLARE_WITH_USERS(_name, _port, ...) \
 	static const struct udp_midi_userlist users_of_##_name = { \
 		.n_users = ARRAY_SIZE(((struct udp_midi_user []) { __VA_ARGS__ })), \
 		.users = { __VA_ARGS__ }, \
 	}; \
 	static struct udp_midi_ep _name = { \
-		.n_peers = (_n_peers), .peers = peers_of_##_name, \
+		.addr4.sin_port = (_port), \
 		.auth_type = UDP_MIDI_USER_PASSWORD, \
 		.userlist = &users_of_##_name, \
-		.addr4.sin_port = (_port), \
 	}
 #endif /* CONFIG_MIDI2_UDP_HOST_AUTH */
 
@@ -93,8 +88,7 @@ struct udp_midi_ep {
 	struct pollfd pollsock;
 	void (*rx_packet_cb)(struct udp_midi_session *session,
 			     const struct midi_ump ump);
-	size_t n_peers;
-	struct udp_midi_session *peers;
+	struct udp_midi_session peers[CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS];
 	enum udp_midi_auth_type auth_type;
 #if CONFIG_MIDI2_UDP_HOST_AUTH
 	union {

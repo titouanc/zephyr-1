@@ -15,6 +15,10 @@ config MIDI2_UDP_HOST
 	  Following "Network MIDI 2.0 (UDP) Transport Specification" v1.0
 
 if MIDI2_UDP_HOST
+config MIDI2_UDP_HOST_MAX_CLIENTS
+	int "Maximum number of clients supported by the MIDI2 host"
+	default 5
+
 config MIDI2_UDP_HOST_AUTH
 	bool "Support for authentication (shared key or user/password)"
 	select MBEDTLS

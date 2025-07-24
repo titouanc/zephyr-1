@@ -152,7 +152,7 @@ static inline struct udp_midi_session *udp_midi_match_session(
 	socklen_t peer_addr_len
 )
 {
-	for (size_t i=0; i<ep->n_peers; i++) {
+	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
 		if (
 			ep->peers[i].addr_len == peer_addr_len &&
 			memcmp(&ep->peers[i].addr, peer_addr, peer_addr_len) == 0
@@ -170,7 +170,7 @@ static inline void udp_midi_free_inactive_sessions(struct udp_midi_ep *ep)
 	struct udp_midi_session *sess;
 	const uint8_t bye_timeout[] = {COMMAND_BYE, 0, 0x04, 0};
 
-	for (size_t i=0; i<ep->n_peers; i++) {
+	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
 		sess = &ep->peers[i];
 		if (! SESSION_HAS_STATE(sess, ESTABLISHED_SESSION)) {
 			SESS_LOG_WRN(sess, "Cleanup inactive session");
@@ -189,7 +189,7 @@ static inline struct udp_midi_session *udp_midi_try_alloc_session(
 {
 	struct udp_midi_session *sess;
 
-	for (size_t i=0; i<ep->n_peers; i++) {
+	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
 		sess = &ep->peers[i];
 		if (sess->state == NOT_INITIALIZED) {
 			sess->state = IDLE;
@@ -595,7 +595,7 @@ int udp_midi_ep_init(struct udp_midi_ep *ep)
 {
 	int ret;
 	int sock;
-	memset(ep->peers, 0, ep->n_peers * sizeof(ep->peers[0]));
+	memset(ep->peers, 0, CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS * sizeof(ep->peers[0]));
 	memset(&ep->addr4, 0, sizeof(ep->addr4));
 	ep->addr4.sin_family = AF_INET;
 
@@ -612,7 +612,7 @@ int udp_midi_ep_init(struct udp_midi_ep *ep)
 		return -EIO;
 	}
 
-	for (size_t i=0; i<ep->n_peers; i++) {
+	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
 		k_work_init(&ep->peers[i].tx_work, udp_midi_session_tx_work);
 	}
 
@@ -631,7 +631,7 @@ int udp_midi_ep_init(struct udp_midi_ep *ep)
 
 void udp_midi_broadcast(struct udp_midi_ep *ep, const struct midi_ump ump)
 {
-	for (size_t i=0; i<ep->n_peers; i++) {
+	for (size_t i=0; i<CONFIG_MIDI2_UDP_HOST_MAX_CLIENTS; i++) {
 		if (ep->peers[i].state == ESTABLISHED_SESSION){
 			udp_midi_send(&ep->peers[i], ump);
 		}
