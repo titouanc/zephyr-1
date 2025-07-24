@@ -54,7 +54,7 @@ LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 #define SESSION_HAS_STATE(session, expected_state) \
 	((session) && (session)->state == expected_state)
 
-NET_BUF_POOL_DEFINE(netmidi2_pool, 10, BUFSIZE, 0, NULL);
+NET_BUF_POOL_DEFINE(netmidi2_pool, 2 + CONFIG_NETMIDI2_HOST_MAX_CLIENTS, BUFSIZE, 0, NULL);
 
 #if CONFIG_NETMIDI2_HOST_AUTH
 #include <zephyr/crypto/crypto.h>
@@ -172,7 +172,7 @@ static inline void netmidi2_free_inactive_sessions(struct netmidi2_ep *ep)
 
 	for (size_t i=0; i<CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
 		sess = &ep->peers[i];
-		if (! SESSION_HAS_STATE(sess, ESTABLISHED_SESSION)) {
+		if (sess->state != IDLE && sess->state != ESTABLISHED_SESSION) {
 			SESS_LOG_WRN(sess, "Cleanup inactive session");
 			zsock_sendto(ep->pollsock.fd, bye_timeout, sizeof(bye_timeout),
 				     0, &sess->addr, sess->addr_len);
@@ -223,6 +223,10 @@ static inline struct netmidi2_session *netmidi2_alloc_session(
 	return res;
 }
 
+/**
+ * @brief      Perform transmission work for an endpoint peer's session
+ * @param      work  The work item (must be contained in a netmidi2_session)
+ */
 static void netmidi2_session_tx_work(struct k_work *work)
 {
 	struct netmidi2_session *session = CONTAINER_OF(work, struct netmidi2_session, tx_work);
@@ -234,10 +238,18 @@ static void netmidi2_session_tx_work(struct k_work *work)
 	net_buf_unref(buf);
 }
 
-static inline int netmidi2_session_cmdheader(struct netmidi2_session *sess,
-					     const uint8_t command_code,
-					     const uint16_t command_specific_data,
-					     const uint8_t payload_len_words)
+/**
+ * @brief      Write the header for a CommandPacket into a session tx buffer
+ * @param      sess                   The peer's session
+ * @param[in]  command_code           The command code
+ * @param[in]  command_specific_data  The command specific data
+ * @param[in]  payload_len_words      Payload length, in 32b words
+ * @return     0 on success, -errno on error
+ */
+static inline int sess_buf_add_header(struct netmidi2_session *sess,
+				      const uint8_t command_code,
+				      const uint16_t command_specific_data,
+				      const uint8_t payload_len_words)
 {
 	if (! sess->tx_buf){
 		sess->tx_buf = net_buf_alloc(&netmidi2_pool, K_FOREVER);
@@ -261,11 +273,32 @@ static inline int netmidi2_session_cmdheader(struct netmidi2_session *sess,
 }
 
 /**
- * @brief      Send a Command Packet to a client session
+ * @brief      Write some bytes into a session tx buffer, and add padding
+ *             zeros at the tail to stay aligned on 4 bytes
+ * @param      session  The session to write to
+ * @param[in]  mem      The memory to be copied
+ * @param[in]  size     The size in bytes of the memory to be copied
+ *
+ * @return     { description_of_the_return_value }
+ */
+static inline void *sess_buf_add_mem_padded(struct netmidi2_session *session,
+					    const uint8_t *mem, size_t size)
+{
+	void *ret = net_buf_add_mem(session->tx_buf, mem, size);
+	switch (size % 4) {
+	case 1: net_buf_add_be24(session->tx_buf, 0); break;
+	case 2: net_buf_add_be16(session->tx_buf, 0); break;
+	case 3: net_buf_add_u8(session->tx_buf, 0); break;
+	}
+	return ret;
+}
+
+/**
+ * @brief      Send a Command Packet (from words) to a client session
  * @param      sess                   The recipient session
  * @param[in]  command_code           The command code
  * @param[in]  command_specific_data  The command specific data
- * @param[in]  payload                The command payload
+ * @param[in]  payload                The command payload as words (4B)
  * @param[in]  payload_len_words      Payload length, in words (4B)
  * @return     0 on sucess, -errno otherwise
  *
@@ -277,7 +310,7 @@ static int netmidi2_session_sendcmd(struct netmidi2_session *sess,
 			            const uint32_t *payload,
 			            const uint8_t payload_len_words)
 {
-	int ret = netmidi2_session_cmdheader(sess, command_code,
+	int ret = sess_buf_add_header(sess, command_code,
 					     command_specific_data,
 					     payload_len_words);
 	if (ret) {
@@ -291,27 +324,32 @@ static int netmidi2_session_sendcmd(struct netmidi2_session *sess,
 	return 0;
 }
 
-static int netmidi2_session_sendcmd_u8(struct netmidi2_session *sess,
-			               const uint8_t command_code,
-			               const uint16_t command_specific_data,
-			               const uint8_t *payload,
-			               const uint8_t payload_len)
+/**
+ * @brief      Send a Command Packet (from bytes) to a client session
+ * @param      sess                   The recipient session
+ * @param[in]  command_code           The command code
+ * @param[in]  command_specific_data  The command specific data
+ * @param[in]  payload                The command payload as bytes
+ * @param[in]  payload_len_words      Payload length, in bytes
+ * @return     0 on sucess, -errno otherwise
+ *
+ * @see udp-ump 5.4 Command Packet Header and Payload
+ */
+static int netmidi2_session_sendcmd_bytes(struct netmidi2_session *sess,
+					  const uint8_t command_code,
+					  const uint16_t command_specific_data,
+					  const uint8_t *payload,
+					  const uint8_t payload_len)
 {
 	uint8_t payload_len_words = DIV_ROUND_UP(payload_len, 4);
-	int ret = netmidi2_session_cmdheader(sess, command_code,
-					     command_specific_data,
-					     payload_len_words);
+	int ret = sess_buf_add_header(sess, command_code,
+				      command_specific_data,
+				      payload_len_words);
 	if (ret) {
 		return ret;
 	}
 
-	net_buf_add_mem(sess->tx_buf, payload, payload_len);
-	switch (payload_len % 4) {
-	case 1: net_buf_add_be24(sess->tx_buf, 0); break;
-	case 2: net_buf_add_be16(sess->tx_buf, 0); break;
-	case 3: net_buf_add_u8(sess->tx_buf, 0); break;
-	}
-
+	sess_buf_add_mem_padded(sess, payload, payload_len);
 	k_work_submit(&sess->tx_work);
 	return 0;
 }
@@ -352,7 +390,14 @@ static inline int netmidi2_quick_reply(const struct netmidi2_ep *ep,
 	return 0;
 }
 
-
+/**
+ * @brief      Quickly send a NAK message to a remote without client session
+ * @param[in]  ep               The endpoint sending the NAK
+ * @param[in]  peer_addr        The peer address
+ * @param[in]  peer_addr_len    The peer address length
+ * @param[in]  nak_reason       The NAK reason
+ * @param[in]  nakd_cmd_header  The command packet header this NAK is replying to
+ */
 static inline int netmidi2_quick_nak(const struct netmidi2_ep *ep,
 				       const struct sockaddr *peer_addr,
 				       const socklen_t peer_addr_len,
@@ -362,6 +407,31 @@ static inline int netmidi2_quick_nak(const struct netmidi2_ep *ep,
 	return netmidi2_quick_reply(ep, peer_addr, peer_addr_len,
 				    COMMAND_NAK, nak_reason << 8,
 				    &nakd_cmd_header, 1);
+}
+
+static int netmidi2_send_invitation_reply_accepted(struct netmidi2_session *session)
+{
+	const char *name = session->ep->name ? session->ep->name : "";
+	const char *piid = session->ep->piid ? session->ep->piid : "";
+
+	size_t namelen = strlen(name);
+	size_t piidlen = strlen(piid);
+
+	size_t namelen_words = DIV_ROUND_UP(namelen, 4);
+	size_t piidlen_words = DIV_ROUND_UP(piidlen, 4);
+
+	int ret = sess_buf_add_header(
+		session, COMMAND_INVITATION_REPLY_ACCEPTED,
+		namelen_words << 8, namelen_words + piidlen_words
+	);
+	if (ret) {
+		return ret;
+	}
+
+	sess_buf_add_mem_padded(session, name, namelen);
+	sess_buf_add_mem_padded(session, piid, piidlen);
+	k_work_submit(&session->tx_work);
+	return 0;
 }
 
 static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
@@ -416,8 +486,7 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 		}
 
 		if (ep->auth_type == NETMIDI2_AUTH_NONE) {
-			netmidi2_session_sendcmd(session, COMMAND_INVITATION_REPLY_ACCEPTED,
-						 0, NULL, 0);
+			netmidi2_send_invitation_reply_accepted(session);
 			session->state = ESTABLISHED_SESSION;
 		}
 
@@ -427,7 +496,7 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 		else {
 			/* TODO: if client has no auth caps; send BYE with reason 0x45 */
 			sys_rand_get(session->nonce, NETMIDI2_NONCE_SIZE);
-			netmidi2_session_sendcmd_u8(
+			netmidi2_session_sendcmd_bytes(
 				session,
 				ep->auth_type == NETMIDI2_AUTH_SHARED_SECRET
 					? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
@@ -461,8 +530,7 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 			return -1;
 		}
 
-		netmidi2_session_sendcmd(session, COMMAND_INVITATION_REPLY_ACCEPTED,
-					 0, NULL, 0);
+		netmidi2_send_invitation_reply_accepted(session);
 		session->state = ESTABLISHED_SESSION;
 		return 0;
 #endif /* CONFIG_NETMIDI2_HOST_AUTH */
