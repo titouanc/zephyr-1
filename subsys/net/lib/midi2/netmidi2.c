@@ -77,8 +77,8 @@ static inline const struct udp_midi_user *udp_midi_find_user(
 	return NULL;
 }
 
-static inline bool udp_midi_auth_session(const struct udp_midi_session *sess,
-					 struct net_buf *buf)
+static bool udp_midi_auth_session(const struct udp_midi_session *sess,
+				  struct net_buf *buf)
 {
 	const struct device *hasher = device_get_binding(CONFIG_CRYPTO_MBEDTLS_SHIM_DRV_NAME);
 	struct hash_ctx ctx = {.flags = crypto_query_hwcaps(hasher)};
@@ -625,7 +625,7 @@ int udp_midi_ep_init(struct udp_midi_ep *ep)
 		return -EIO;
 	}
 
-	LOG_INF("Started UDP-MIDI2 server");
+	LOG_INF("Started UDP-MIDI2 server (%d)", ep->addr4.sin_port);
 	return 0;
 }
 
