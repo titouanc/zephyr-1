@@ -14,7 +14,7 @@
 
 #define NETMIDI2_NONCE_SIZE 16
 
-#define NETMIDI2_EP_DECLARE_NO_AUTH(_var_name, _ep_name, _piid, _port) \
+#define NETMIDI2_EP_DECLARE(_var_name, _ep_name, _piid, _port) \
 	static struct netmidi2_ep _var_name = { \
 		.name = (_ep_name), \
 		.piid = (_piid), \
@@ -25,8 +25,9 @@
 #if CONFIG_NETMIDI2_HOST_AUTH
 #define NETMIDI2_EP_DECLARE_WITH_AUTH(_var_name, _ep_name, _piid, _port, _secret) \
 	static struct netmidi2_ep _var_name = { \
-		.addr4.sin_port = (_port), \
+		.name = (_ep_name), \
 		.piid = (_piid), \
+		.addr4.sin_port = (_port), \
 		.auth_type = NETMIDI2_AUTH_SHARED_SECRET, \
 		.shared_auth_secret = (_secret), \
 	}
@@ -40,7 +41,7 @@
 		.name = (_ep_name), \
 		.piid = (_piid), \
 		.addr4.sin_port = (_port), \
-		.auth_type = NETMIDI2_USER_PASSWORD, \
+		.auth_type = NETMIDI2_AUTH_USER_PASSWORD, \
 		.userlist = &users_of_##_var_name, \
 	}
 #endif /* CONFIG_NETMIDI2_HOST_AUTH */
@@ -102,7 +103,7 @@ enum netmidi2_auth_type {
 	/** Authentication with a shared secret key */
 	NETMIDI2_AUTH_SHARED_SECRET,
 	/** Authentication with username and password */
-	NETMIDI2_USER_PASSWORD,
+	NETMIDI2_AUTH_USER_PASSWORD,
 };
 
 /**

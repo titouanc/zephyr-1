@@ -8,7 +8,7 @@ LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 
 #define BUFSIZE 256
 
-/* See udp-ump 5.5: Command Codes and Packet Types */
+/* See netmidi10: 5.5: Command Codes and Packet Types */
 #define COMMAND_INVITATION				0x01
 #define COMMAND_INVITATION_WITH_AUTH			0x02
 #define COMMAND_INVITATION_WITH_USER_AUTH		0x03
@@ -27,11 +27,11 @@ LOG_MODULE_REGISTER(net_midi2, CONFIG_NET_MIDI2_LOG_LEVEL);
 #define COMMAND_BYE_REPLY				0xF1
 #define COMMAND_UMP_DATA				0xFF
 
-/* See udp-ump 6.4 / Table 11: Capabilities for Invitation */
+/* See netmidi10: 6.4 / Table 11: Capabilities for Invitation */
 #define CLIENT_CAP_INV_WITH_AUTH	BIT(0)
 #define CLIENT_CAP_INV_WITH_USER_AUTH	BIT(1)
 
-/* See udp-ump 6.15 / Table 25: List of NAK Reasons */
+/* See netmidi10: 6.15 / Table 25: List of NAK Reasons */
 #define NAK_OTHER			0x00
 #define NAK_COMMAND_NOT_SUPPORTED	0x01
 #define NAK_COMMAND_NOT_EXPECTED	0x02
@@ -64,7 +64,7 @@ static inline const struct netmidi2_user *netmidi2_find_user(
 	const struct netmidi2_ep *ep, const char *name, size_t namelen
 )
 {
-	if (ep->auth_type != NETMIDI2_USER_PASSWORD) {
+	if (ep->auth_type != NETMIDI2_AUTH_USER_PASSWORD) {
 		return NULL;
 	}
 
@@ -106,7 +106,7 @@ static bool netmidi2_auth_session(const struct netmidi2_session *sess,
 	if (sess->ep->auth_type == NETMIDI2_AUTH_SHARED_SECRET) {
 		memcpy(&input[NETMIDI2_NONCE_SIZE], sess->ep->shared_auth_secret, secret_len);
 		hash.in_len += secret_len;
-	} else if (sess->ep->auth_type == NETMIDI2_USER_PASSWORD) {
+	} else if (sess->ep->auth_type == NETMIDI2_AUTH_USER_PASSWORD) {
 		/* TODO: better handling of username length !
 		 * It's actually NOT always the buffer length,
 		 * as other command packets may follow */
@@ -302,7 +302,7 @@ static inline void *sess_buf_add_mem_padded(struct netmidi2_session *session,
  * @param[in]  payload_len_words      Payload length, in words (4B)
  * @return     0 on sucess, -errno otherwise
  *
- * @see udp-ump 5.4 Command Packet Header and Payload
+ * @see netmidi10: 5.4 Command Packet Header and Payload
  */
 static int netmidi2_session_sendcmd(struct netmidi2_session *sess,
 			            const uint8_t command_code,
@@ -333,7 +333,7 @@ static int netmidi2_session_sendcmd(struct netmidi2_session *sess,
  * @param[in]  payload_len_words      Payload length, in bytes
  * @return     0 on sucess, -errno otherwise
  *
- * @see udp-ump 5.4 Command Packet Header and Payload
+ * @see netmidi10: 5.4 Command Packet Header and Payload
  */
 static int netmidi2_session_sendcmd_bytes(struct netmidi2_session *sess,
 					  const uint8_t command_code,
@@ -409,24 +409,60 @@ static inline int netmidi2_quick_nak(const struct netmidi2_ep *ep,
 				    &nakd_cmd_header, 1);
 }
 
-static int netmidi2_send_invitation_reply_accepted(struct netmidi2_session *session)
+/**
+ * @brief      Send a message "Invitation reply: ..." to a client.
+ *             The type of Invitaion Reply command code depends on the
+ *             session state
+ * @param      session  The session to which the message shall be send
+ * @return     0 on success, -errno on error
+ *
+ * @see netmidi10: 6.5 Invitation Reply: Accepted
+ */
+static int netmidi2_send_invitation_reply(struct netmidi2_session *session)
 {
+	int ret;
+	uint8_t command_code;
+
 	const char *name = session->ep->name ? session->ep->name : "";
 	const char *piid = session->ep->piid ? session->ep->piid : "";
+	const size_t namelen = strlen(name);
+	const size_t piidlen = strlen(piid);
+	const size_t nonce_words = DIV_ROUND_UP(NETMIDI2_NONCE_SIZE, 4);
+	const size_t namelen_words = DIV_ROUND_UP(namelen, 4);
+	const size_t piidlen_words = DIV_ROUND_UP(piidlen, 4);
 
-	size_t namelen = strlen(name);
-	size_t piidlen = strlen(piid);
+	size_t total_words = namelen_words + piidlen_words;
 
-	size_t namelen_words = DIV_ROUND_UP(namelen, 4);
-	size_t piidlen_words = DIV_ROUND_UP(piidlen, 4);
+	if (session->state == ESTABLISHED_SESSION) {
+		command_code = COMMAND_INVITATION_REPLY_ACCEPTED;
+	}
+#if CONFIG_NETMIDI2_HOST_AUTH
+	else if (session->state == AUTHENTICATION_REQUIRED) {
+		total_words += nonce_words;
 
-	int ret = sess_buf_add_header(
-		session, COMMAND_INVITATION_REPLY_ACCEPTED,
-		namelen_words << 8, namelen_words + piidlen_words
-	);
+		if (session->ep->auth_type == NETMIDI2_AUTH_SHARED_SECRET) {
+			command_code = COMMAND_INVITATION_REPLY_AUTH_REQUIRED;
+		} else if (session->ep->auth_type == NETMIDI2_AUTH_USER_PASSWORD) {
+			command_code = COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED;
+		} else {
+			return -EINVAL;
+		}
+	}
+#endif /* CONFIG_NETMIDI2_HOST_AUTH */
+	else {
+		return -EINVAL;
+	}
+
+	ret = sess_buf_add_header(session, command_code, namelen_words << 8, total_words);
 	if (ret) {
 		return ret;
 	}
+
+#if CONFIG_NETMIDI2_HOST_AUTH
+	if (session->state == AUTHENTICATION_REQUIRED) {
+		sess_buf_add_mem_padded(session, session->nonce, NETMIDI2_NONCE_SIZE);
+	}
+#endif /* CONFIG_NETMIDI2_HOST_AUTH */
 
 	sess_buf_add_mem_padded(session, name, namelen);
 	sess_buf_add_mem_padded(session, piid, piidlen);
@@ -486,8 +522,8 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 		}
 
 		if (ep->auth_type == NETMIDI2_AUTH_NONE) {
-			netmidi2_send_invitation_reply_accepted(session);
 			session->state = ESTABLISHED_SESSION;
+			netmidi2_send_invitation_reply(session);
 		}
 
 #if ! CONFIG_NETMIDI2_HOST_AUTH
@@ -496,16 +532,8 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 		else {
 			/* TODO: if client has no auth caps; send BYE with reason 0x45 */
 			sys_rand_get(session->nonce, NETMIDI2_NONCE_SIZE);
-			netmidi2_session_sendcmd_bytes(
-				session,
-				ep->auth_type == NETMIDI2_AUTH_SHARED_SECRET
-					? COMMAND_INVITATION_REPLY_AUTH_REQUIRED
-					: COMMAND_INVITATION_REPLY_USER_AUTH_REQUIRED,
-				0,
-				session->nonce,
-				NETMIDI2_NONCE_SIZE
-			);
 			session->state = AUTHENTICATION_REQUIRED;
+			netmidi2_send_invitation_reply(session);
 		}
 
 		return 0;
@@ -530,8 +558,8 @@ static int netmidi2_dispatch_command_packet(struct netmidi2_ep *ep,
 			return -1;
 		}
 
-		netmidi2_send_invitation_reply_accepted(session);
 		session->state = ESTABLISHED_SESSION;
+		netmidi2_send_invitation_reply(session);
 		return 0;
 #endif /* CONFIG_NETMIDI2_HOST_AUTH */
 

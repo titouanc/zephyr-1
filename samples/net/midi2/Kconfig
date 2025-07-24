@@ -12,11 +12,11 @@ config NET_SAMPLE_MIDI2_AUTH_NONE
 
 config NET_SAMPLE_MIDI2_AUTH_SHARED_SECRET
 	bool "Authentication with shared secret"
-	select MIDI2_UDP_HOST_AUTH
+	select NETMIDI2_HOST_AUTH
 
 config NET_SAMPLE_MIDI2_AUTH_USER_PASSWORD
 	bool "Authentication with username+password"
-	select MIDI2_UDP_HOST_AUTH
+	select NETMIDI2_HOST_AUTH
 
 endchoice
 

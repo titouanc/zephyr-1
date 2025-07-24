@@ -99,7 +99,7 @@ static void netmidi2_callback(struct netmidi2_session *session,
 
 #if CONFIG_NET_SAMPLE_MIDI2_AUTH_NONE
 
-NETMIDI2_EP_DECLARE_NO_AUTH(midi_server, ump_ep_dt.name, NULL, 0);
+NETMIDI2_EP_DECLARE(midi_server, ump_ep_dt.name, NULL, 0);
 
 #elif CONFIG_NET_SAMPLE_MIDI2_AUTH_SHARED_SECRET
 
