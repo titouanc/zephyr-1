@@ -815,6 +815,27 @@
 				 <&rcc STM32_SRC_HSI48 OTGFS_SEL(0)>;
 			status = "disabled";
 		};
+
+		usbotg_hs: usb@40040000 {
+			compatible = "st,stm32-otghs";
+			reg = <0x40040000 0x40000>;
+			interrupts = <91 0>;
+			interrupt-names = "otghs";
+			num-bidir-endpoints = <9>;
+			ram-size = <DT_SIZE_K(4)>;
+			maximum-speed = "high-speed";
+			phys = <&usbphyc1>;
+			clocks = <&rcc STM32_CLOCK(AHB1, 25U)>;
+			status = "disabled";
+		};
+	};
+
+	usbphyc1: usbphyc@4000ec00 {
+		compatible = "st,stm32-usbphyc";
+		reg = <0x4000ec00 0x400>;
+		clocks = <&rcc STM32_CLOCK(AHB1, 26U)>,
+			 <&rcc STM32_SRC_HSE USBPHYC_SEL(0)>;
+		#phy-cells = <0>;
 	};
 
 	otgfs_phy: otgfs_phy {

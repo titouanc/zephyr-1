@@ -296,6 +296,12 @@
 	status = "okay";
 };
 
+usb1: &usbotg_hs {
+	pinctrl-0 = <&usb_otg_hs_dm_pm5 &usb_otg_hs_dp_pm6>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
 usb2: &usbotg_fs {
 	pinctrl-0 = <&usb_otg_fs_dm_pm12 &usb_otg_fs_dp_pm11>;
 	pinctrl-names = "default";
