@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <dt-bindings/pinctrl/silabs/siwx91x-pinctrl.h>
+#include <zephyr/dt-bindings/pinctrl/silabs/siwx91x-pinctrl.h>
 
 &pinctrl0 {
 	psram_default: psram_default {
@@ -32,5 +32,4 @@
 			pinmux = <ULPI2C_SDA_ULP6>, <ULPI2C_SCL_ULP7>;
 		};
 	};
-
 };

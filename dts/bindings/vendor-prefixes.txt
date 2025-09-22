@@ -208,6 +208,7 @@ element14	Element14 (A Premier Farnell Company)
 elgin	Elgin S/A.
 elida	Shenzhen Elida Technology Co., Ltd.
 elimo	Elimo Engineering Ltd.
+embedsky	Guangdong Embedsky Technology Co., Ltd.
 embest	Shenzhen Embest Technology Co., Ltd.
 emlid	Emlid, Ltd.
 emmicro	EM Microelectronic
@@ -246,6 +247,7 @@ festo	Festo SE & Co. KG
 fii	Foxconn Industrial Internet
 fintek	Feature Integration Technology Inc.
 firefly	Firefly
+fobe	FoBE Studio
 focaltech	FocalTech Systems Co.,Ltd
 franzininho	Franzininho
 frida	Shenzhen Frida LCD Co., Ltd.
@@ -547,6 +549,7 @@ prt	Protonic Holland
 ptc	Princeton Technology Corp.
 pulsedlight	PulsedLight, Inc
 purism	Purism, SPC
+puya	Puya Semiconductor (Shanghai) Co., Ltd
 qca	Qualcomm Atheros, Inc.
 qcom	Qualcomm Technologies, Inc
 qemu	QEMU, a generic and open source machine emulator and virtualizer
@@ -594,7 +597,7 @@ sancloud	Sancloud Ltd
 sandisk	Sandisk Corporation
 satoz	Satoz International Co., Ltd
 sbs	Smart Battery System
-sc	Space Cubics, LLC
+sc	Space Cubics Inc.
 schindler	Schindler
 sciosense	Sciosense B.V.
 seagate	Seagate Technology PLC
@@ -617,6 +620,7 @@ si-en	Si-En Technology Ltd.
 si-linux	Silicon Linux Corporation
 siemens	Siemens AG
 sifive	SiFive, Inc.
+sifli	SiFli Technologies(Nanjing) Co., Ltd
 sigma	Sigma Designs, Inc.
 sii	Seiko Instruments, Inc.
 sil	Silicon Image
@@ -646,7 +650,6 @@ solderparty	Solder Party AB
 solidrun	SolidRun
 solomon	Solomon Systech Limited
 sony	Sony Corporation
-spacecubics	Space Cubics, LLC
 spansion	Spansion Inc.
 sparkfun	SparkFun Electronics
 sprd	Spreadtrum Communications Inc.
@@ -772,6 +775,7 @@ xiphera	Xiphera Ltd.
 xlnx	Xilinx
 xnano	Xnano
 xptek	Shenzhen Xptek Technology Co., Ltd
+xuantie	Alibaba Xuantie
 xunlong	Shenzhen Xunlong Software CO.,Limited
 xylon	Xylon
 yamaha	Yamaha Corporation

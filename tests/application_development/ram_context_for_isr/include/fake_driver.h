@@ -11,11 +11,18 @@
 extern "C" {
 #endif
 
+#if CONFIG_TEST_IRQ_NUM == 0
+/* For all the other platforms, use the last available IRQ line for testing. */
+#define TEST_IRQ_NUM (CONFIG_NUM_IRQS - 1)
+#else
+#define TEST_IRQ_NUM CONFIG_TEST_IRQ_NUM
+#endif
+
 typedef void (*fake_driver_irq_callback_t)(const struct device *dev, void *user_data);
 
 struct fake_driver_config {
 	void (*irq_config_func)(void);
-	uint8_t irq_num;
+	uint16_t irq_num;
 	uint8_t irq_priority;
 };
 

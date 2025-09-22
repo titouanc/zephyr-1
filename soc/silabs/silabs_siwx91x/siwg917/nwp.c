@@ -17,6 +17,8 @@
 
 #include "nwp.h"
 #include "sl_wifi_callback_framework.h"
+
+#include "sl_si91x_ble.h"
 #ifdef CONFIG_BT_SILABS_SIWX91X
 #include "rsi_ble_common_config.h"
 #endif
@@ -31,6 +33,96 @@ LOG_MODULE_REGISTER(siwx91x_nwp);
 BUILD_ASSERT(DT_REG_SIZE(DT_CHOSEN(zephyr_sram)) == KB(195) ||
 	     DT_REG_SIZE(DT_CHOSEN(zephyr_sram)) == KB(255) ||
 	     DT_REG_SIZE(DT_CHOSEN(zephyr_sram)) == KB(319));
+
+extern const sli_si91x_set_region_ap_request_t default_US_region_2_4GHZ_configurations;
+extern const sli_si91x_set_region_ap_request_t default_EU_region_2_4GHZ_configurations;
+extern const sli_si91x_set_region_ap_request_t default_JP_region_2_4GHZ_configurations;
+extern const sli_si91x_set_region_ap_request_t default_KR_region_2_4GHZ_configurations;
+extern const sli_si91x_set_region_ap_request_t default_SG_region_2_4GHZ_configurations;
+extern const sli_si91x_set_region_ap_request_t default_CN_region_2_4GHZ_configurations;
+
+static char current_country_code[WIFI_COUNTRY_CODE_LEN];
+typedef struct {
+	const char *const *codes;
+	size_t num_codes;
+	sl_wifi_region_code_t region_code;
+	const sli_si91x_set_region_ap_request_t *sdk_reg;
+} region_map_t;
+
+static const char *const us_codes[] = {
+	"AE", "AR", "AS", "BB", "BM", "BR", "BS", "CA", "CO", "CR", "CU", "CX",
+	"DM", "DO", "EC", "FM", "GD", "GY", "GU", "HN", "HT", "JM", "KY", "LB",
+	"LK", "MH", "MN", "MP", "MO", "MY", "NI", "PA", "PE", "PG", "PH", "PK",
+	"PR", "PW", "PY", "SG", "MX", "SV", "TC", "TH", "TT", "US", "UY", "VE",
+	"VI", "VN", "VU", "00"
+	/* Map "00" (world domain) to US region,
+	 * as using the world domain is not recommended
+	 */
+};
+static const char *const eu_codes[] = {
+	"AD", "AF", "AI", "AL", "AM", "AN", "AT", "AW", "AU", "AZ", "BA", "BE",
+	"BG", "BH", "BL", "BT", "BY", "CH", "CY", "CZ", "DE", "DK", "EE", "ES",
+	"FR", "GB", "GE", "GF", "GL", "GP", "GR", "GT", "HK", "HR", "HU", "ID",
+	"IE", "IL", "IN", "IR", "IS", "IT", "JO", "KH", "FI", "KN", "KW", "KZ",
+	"LC", "LI", "LT", "LU", "LV", "MD", "ME", "MK", "MF", "MT", "MV", "MQ",
+	"NL", "NO", "NZ", "OM", "PF", "PL", "PM", "PT", "QA", "RO", "RS", "RU",
+	"SA", "SE", "SI", "SK", "SR", "SY", "TR", "TW", "UA", "UZ", "VC", "WF",
+	"WS", "YE", "RE", "YT"
+};
+static const char *const jp_codes[] = {"BD", "BN", "BO", "CL", "BZ", "JP", "NP"};
+static const char *const kr_codes[] = {"KR", "KP"};
+static const char *const cn_codes[] = {"CN"};
+
+static const region_map_t region_maps[] = {
+	{us_codes, ARRAY_SIZE(us_codes), SL_WIFI_REGION_US,
+	 &default_US_region_2_4GHZ_configurations},
+	{eu_codes, ARRAY_SIZE(eu_codes), SL_WIFI_REGION_EU,
+	 &default_EU_region_2_4GHZ_configurations},
+	{jp_codes, ARRAY_SIZE(jp_codes), SL_WIFI_REGION_JP,
+	 &default_JP_region_2_4GHZ_configurations},
+	{kr_codes, ARRAY_SIZE(kr_codes), SL_WIFI_REGION_KR,
+	 &default_KR_region_2_4GHZ_configurations},
+	{cn_codes, ARRAY_SIZE(cn_codes), SL_WIFI_REGION_CN,
+	 &default_CN_region_2_4GHZ_configurations},
+};
+
+int siwx91x_store_country_code(const char *country_code)
+{
+	__ASSERT(country_code, "country_code cannot be NULL");
+
+	memcpy(current_country_code, country_code, WIFI_COUNTRY_CODE_LEN);
+	return 0;
+}
+
+const char *siwx91x_get_country_code(void)
+{
+	return current_country_code;
+}
+
+sl_wifi_region_code_t siwx91x_map_country_code_to_region(const char *country_code)
+{
+	__ASSERT(country_code, "country_code cannot be NULL");
+
+	ARRAY_FOR_EACH(region_maps, i) {
+		for (size_t j = 0; j < region_maps[i].num_codes; j++) {
+			if (memcmp(country_code, region_maps[i].codes[j],
+				   WIFI_COUNTRY_CODE_LEN) == 0) {
+				return region_maps[i].region_code;
+			}
+		}
+	}
+	return SL_WIFI_DEFAULT_REGION;
+}
+
+const sli_si91x_set_region_ap_request_t *siwx91x_find_sdk_region_table(uint8_t region_code)
+{
+	ARRAY_FOR_EACH(region_maps, i) {
+		if (region_maps[i].region_code == region_code) {
+			return region_maps[i].sdk_reg;
+		}
+	}
+	return NULL;
+}
 
 static void siwx91x_apply_sram_config(sl_si91x_boot_configuration_t *boot_config)
 {
@@ -161,8 +253,8 @@ int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t w
 			   bool hidden_ssid, uint8_t max_num_sta)
 {
 	sl_wifi_device_configuration_t default_config = {
+		.region_code = siwx91x_map_country_code_to_region(DEFAULT_COUNTRY_CODE),
 		.band = SL_SI91X_WIFI_BAND_2_4GHZ,
-		.region_code = DEFAULT_REGION,
 		.boot_option = LOAD_NWP_FW,
 		.boot_config = {
 			.feature_bit_map = SL_SI91X_FEAT_SECURITY_OPEN | SL_SI91X_FEAT_WPS_DISABLE |
@@ -193,6 +285,7 @@ int siwx91x_get_nwp_config(sl_wifi_device_configuration_t *get_config, uint8_t w
 		return -EINVAL;
 	}
 
+	siwx91x_store_country_code(DEFAULT_COUNTRY_CODE);
 	siwx91x_apply_sram_config(boot_config);
 
 	switch (wifi_oper_mode) {
@@ -244,6 +337,8 @@ static int siwg917_nwp_init(void)
 	sl_status_t status;
 	__maybe_unused sl_wifi_performance_profile_t performance_profile = {
 		.profile = SI91X_POWER_PROFILE};
+	__maybe_unused sl_bt_performance_profile_t bt_performance_profile = {
+		.profile = SI91X_POWER_PROFILE};
 
 	siwx91x_get_nwp_config(&network_config, WIFI_STA_MODE, false, 0);
 	/* TODO: If sl_net_*_profile() functions will be needed for WiFi then call
@@ -255,6 +350,21 @@ static int siwg917_nwp_init(void)
 	}
 
 	if (IS_ENABLED(CONFIG_SOC_SIWX91X_PM_BACKEND_PMGR)) {
+		if (IS_ENABLED(CONFIG_BT_SILABS_SIWX91X)) {
+			status = sl_si91x_bt_set_performance_profile(&bt_performance_profile);
+			if (status != SL_STATUS_OK) {
+				LOG_ERR("Failed to initiate power save in BLE mode");
+				return -EINVAL;
+			}
+		}
+		/*
+		 * Note: the WiFi related sources are always imported (because of
+		 * CONFIG_WISECONNECT_NETWORK_STACK) whatever the value of CONFIG_WIFI. However,
+		 * because of boot_config->coex_mode, sl_wifi_set_performance_profile() is a no-op
+		 * if CONFIG_WIFI=n and CONFIG_BT=y. We could probably remove the dependency to the
+		 * WiFi sources in this case. However, outside of the code size, this dependency
+		 * does not hurt.
+		 */
 		status = sl_wifi_set_performance_profile(&performance_profile);
 		if (status != SL_STATUS_OK) {
 			return -EINVAL;

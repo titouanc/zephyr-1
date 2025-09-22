@@ -114,4 +114,10 @@ source "drivers/clock_control/Kconfig.wch_rcc"
 
 source "drivers/clock_control/Kconfig.it51xxx"
 
+source "drivers/clock_control/Kconfig.mchp"
+
+source "drivers/clock_control/Kconfig.sf32lb_hxt48"
+
+source "drivers/clock_control/Kconfig.sf32lb_rcc"
+
 endif # CLOCK_CONTROL

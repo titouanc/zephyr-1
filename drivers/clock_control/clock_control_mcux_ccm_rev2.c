@@ -217,6 +217,16 @@ static int mcux_ccm_get_subsys_rate(const struct device *dev,
 			clock_root = (kCLOCK_Root_Tpm4 + instance - 3);
 		}
 		break;
+#elif defined(CONFIG_SOC_MIMX9352_A55) || defined(CONFIG_SOC_MIMX9352_M33)
+	case IMX_CCM_TPM_CLK:
+		switch (instance) {
+		case 2:
+			clock_root = kCLOCK_Root_BusWakeup;
+			break;
+		default:
+			clock_root = kCLOCK_Root_Tpm1 + instance;
+		}
+		break;
 #else
 	case IMX_CCM_TPM_CLK:
 		clock_root = kCLOCK_Root_Tpm1 + instance;
@@ -256,10 +266,34 @@ static int mcux_ccm_get_subsys_rate(const struct device *dev,
 		clock_root = kCLOCK_Root_Bus + instance;
 		break;
 #endif
-
+#ifdef CONFIG_COUNTER_MCUX_LPIT
+#if defined(CONFIG_SOC_SERIES_IMXRT118X)
+	case IMX_CCM_LPIT_CLK:
+		switch (instance) {
+		case 0:
+			clock_root = kCLOCK_Root_Bus_Aon;
+			break;
+		case 1:
+			clock_root = kCLOCK_Root_Bus_Wakeup;
+			break;
+		case 2:
+			clock_root = kCLOCK_Root_Lpit3;
+			break;
+		default:
+			return -EINVAL;
+		}
+		break;
+#endif
+#endif
 #ifdef CONFIG_ADC_MCUX_LPADC
 	case IMX_CCM_LPADC1_CLK:
 		clock_root = kCLOCK_Root_Adc1 + instance;
+		break;
+#endif
+
+#ifdef CONFIG_ADC_MCUX_SAR_ADC
+	case IMX_CCM_SAR_ADC1_CLK:
+		clock_root = kCLOCK_Root_Adc + instance;
 		break;
 #endif
 
@@ -278,6 +312,12 @@ static int mcux_ccm_get_subsys_rate(const struct device *dev,
 		break;
 	case IMX_CCM_MIPI_CSI2RX_UI_CLK:
 		clock_root = kCLOCK_Root_Csi2_Ui;
+		break;
+#endif
+
+#ifdef CONFIG_INPUT_MCUX_KPP
+	case IMX_CCM_KPP_CLK:
+		clock_root = kCLOCK_CpuClk;
 		break;
 #endif
 

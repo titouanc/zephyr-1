@@ -5,10 +5,10 @@
 
 /dts-v1/;
 #include <silabs/siwg917m111mgtba.dtsi>
-#include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/input/input-event-codes.h>
-#include <dt-bindings/pinctrl/silabs/siwx91x-pinctrl.h>
-#include <common/freq.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pinctrl/silabs/siwx91x-pinctrl.h>
+#include <freq.h>
 #include "siwx917_dk2605a-pinctrl.dtsi"
 
 / {
@@ -117,7 +117,7 @@ zephyr_i2c: &ulpi2c {
 	clocks = <&clock0 SIWX91X_CLK_QSPI>;
 	pinctrl-0 = <&psram_default>;
 	pinctrl-names = "default";
-	device-id = [ 0d 5d 00 00 00 00 00 00 ];
+	device-id = [0d 5d 00 00 00 00 00 00];
 	fast-freq = <DT_FREQ_M(144)>;
 	normal-freq = <DT_FREQ_M(33)>;
 	status = "okay";
@@ -125,7 +125,7 @@ zephyr_i2c: &ulpi2c {
 	psram: psram@a000000 {
 		compatible = "zephyr,memory-region", "mmio-sram";
 		reg = <0xa000000 DT_SIZE_M(8)>;
-		zephyr,memory-attr = <( DT_MEM_ARM(ATTR_MPU_RAM) )>;
+		zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM)>;
 		zephyr,memory-region = "psram";
 	};
 };

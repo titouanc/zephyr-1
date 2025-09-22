@@ -9,11 +9,21 @@
 #include <common/freq.h>
 #include <dt-bindings/mfd/mfd_mchp_sam_flexcom.h>
 #include <dt-bindings/pinctrl/sama7g5-pinctrl.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/microchip-sam-gpio.h>
+#include <dt-bindings/input/input-event-codes.h>
 #include <microchip/sam/sama7g5.dtsi>
 
 / {
 	model = "SAMA7G54-EK board";
 	compatible = "microchip,sama7g5ek", "microchip,sama7g5", "microchip,sama7";
+
+	aliases {
+		led0 = &led_green;
+		sw0 = &button_user;
+		sdhc0 = &sdmmc0;
+		sdhc1 = &sdmmc1;
+	};
 
 	chosen {
 		zephyr,sram = &ddram;
@@ -34,6 +44,37 @@
 	ddram: ddram@60000000 {
 		compatible = "ddram";
 		reg = <0x60000000 DT_SIZE_M(512)>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		status = "okay";
+
+		led_red: red {
+			label = "red";
+			gpios = <&piob 8 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_green: green {
+			label = "green";
+			gpios = <&pioa 13 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_blue: blue {
+			label = "blue";
+			gpios = <&piod 20 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	gpio_keys {
+		compatible = "gpio-keys";
+		status = "okay";
+
+		button_user: button_0 {
+			label = "PB_USER";
+			gpios = <&pioa 12 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_0>;
+		};
 	};
 };
 
@@ -96,8 +137,83 @@
 			bias-disable;
 		};
 	};
+
+	pinctrl_sdmmc0_default: sdmmc0_default {
+		cmd_data {
+			pinmux = <PIN_PA1__SDMMC0_CMD>,
+				 <PIN_PA3__SDMMC0_DAT0>,
+				 <PIN_PA4__SDMMC0_DAT1>,
+				 <PIN_PA5__SDMMC0_DAT2>,
+				 <PIN_PA6__SDMMC0_DAT3>,
+				 <PIN_PA7__SDMMC0_DAT4>,
+				 <PIN_PA8__SDMMC0_DAT5>,
+				 <PIN_PA9__SDMMC0_DAT6>,
+				 <PIN_PA10__SDMMC0_DAT7>;
+			bias-pull-up;
+		};
+
+		ck_cd_rstn_vddsel {
+			pinmux = <PIN_PA0__SDMMC0_CK>,
+				 <PIN_PA2__SDMMC0_RSTN>,
+				 <PIN_PA11__SDMMC0_DS>;
+			bias-pull-up;
+		};
+	};
+
+	pinctrl_sdmmc1_default: sdmmc1_default {
+		cmd_data {
+			pinmux = <PIN_PB29__SDMMC1_CMD>,
+				 <PIN_PB31__SDMMC1_DAT0>,
+				 <PIN_PC0__SDMMC1_DAT1>,
+				 <PIN_PC1__SDMMC1_DAT2>,
+				 <PIN_PC2__SDMMC1_DAT3>;
+			bias-pull-up;
+		};
+
+		ck_cd_rstn_vddsel {
+			pinmux = <PIN_PB30__SDMMC1_CK>,
+				 <PIN_PB28__SDMMC1_RSTN>,
+				 <PIN_PC5__SDMMC1_1V8SEL>,
+				 <PIN_PC4__SDMMC1_CD>;
+			bias-pull-up;
+		};
+	};
+
 };
 
 &pit64b0 {
 	clock-frequency = <DT_FREQ_M(10)>;
+};
+
+&sdmmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_sdmmc0_default>;
+	max-bus-freq = <DT_FREQ_M(208)>;
+	non-removable;
+	bus-width = <8>;
+	no-1-8-v;
+	auto-cmd23;
+	status = "okay";
+
+	sdmmc {
+		compatible = "zephyr,mmc-disk";
+		disk-name = "SD2";
+		status = "okay";
+	};
+};
+
+&sdmmc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_sdmmc1_default>;
+	max-bus-freq = <DT_FREQ_M(208)>;
+	no-1-8-v;
+	rstn-power-en;
+	auto-cmd12;
+	status = "okay";
+
+	sdmmc {
+		compatible = "zephyr,sdmmc-disk";
+		disk-name = "SD";
+		status = "okay";
+	};
 };
