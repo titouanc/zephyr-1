@@ -503,6 +503,20 @@
 			status = "disabled";
 		};
 
+		i2s6: i2s@58001400 {
+			compatible = "st,stm32h7-i2s", "st,stm32-i2s";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x58001400 0x400>;
+			clocks = <&rcc STM32_CLOCK(APB4, 5)>,
+				 <&rcc STM32_SRC_PLL2_Q SPI6_SEL(1)>;
+			interrupts = <63 3>;
+			dmas = <&gpdma1 0 62 (STM32_DMA_PERIPH_TX | STM32_DMA_16BITS | STM32_DMA_PRIORITY_HIGH)
+				&gpdma1 1 61 (STM32_DMA_PERIPH_RX | STM32_DMA_16BITS | STM32_DMA_PRIORITY_HIGH)>;
+			dma-names = "tx", "rx";
+			status = "disabled";
+		};
+
 		fdcan1: can@4000a000 {
 			compatible = "st,stm32-fdcan";
 			reg = <0x4000a000 0x400>, <0x4000ac00 0x350>;
