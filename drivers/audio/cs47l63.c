@@ -21,6 +21,12 @@ struct cs47l63_config {
 	struct gpio_dt_spec irq_gpio;
 };
 
+#define PRINT_REG(spi, reg_name) \
+	do {uint32_t value; \
+	    cs47l63_read_spi_regs(spi, reg_name, &value, 1); \
+	    LOG_INF("%20s (%4X) = %08X", &(#reg_name)[12], reg_name, value);} \
+	while (0)
+
 static int cs47l63_read_spi_regs(const struct spi_dt_spec *spi,
 				 uint32_t start_reg, uint32_t *values, size_t count)
 {
