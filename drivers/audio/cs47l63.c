@@ -21,6 +21,11 @@ struct cs47l63_config {
 	struct gpio_dt_spec irq_gpio;
 };
 
+struct reg_value {
+	uint32_t reg;
+	uint32_t value;
+};
+
 #define PRINT_REG(spi, reg_name) \
 	do {uint32_t value; \
 	    cs47l63_read_spi_regs(spi, reg_name, &value, 1); \
@@ -104,6 +109,22 @@ static inline int cs47l63_update_spi_reg(const struct spi_dt_spec *spi,
 	return cs47l63_write_spi_reg(spi, reg, (prev_value & ~mask) | (value & mask));
 }
 
+static inline int cs47l63_write_spi_regs(const struct spi_dt_spec *spi,
+	                                 const struct reg_value *values,
+	                                 size_t n_values)
+{
+	int ret;
+
+	for (size_t i=0; i<n_values; i++) {
+		ret = cs47l63_write_spi_reg(spi, values[i].reg, values[i].value);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 static inline int cs47l63_sample_rate(uint32_t frame_clk_freq)
 {
 	switch (frame_clk_freq) {
@@ -142,6 +163,7 @@ static inline int cs47l63_sample_rate(uint32_t frame_clk_freq)
 static int cs47l63_configure(const struct device *dev, struct audio_codec_cfg *audiocfg)
 {
 	int ret;
+	uint32_t clk_config;
 	uint8_t format, sample_rate;
 	uint8_t wordsize = audiocfg->dai_cfg.i2s.word_size;
 	const struct cs47l63_config *cfg = dev->config;
@@ -172,46 +194,33 @@ static int cs47l63_configure(const struct device *dev, struct audio_codec_cfg *a
 		return -ENOTSUP;
 	}
 
-	ret = cs47l63_write_spi_reg(&cfg->spi, CS47L63_REG_ASP1_CONTROL2,
-				    (wordsize << 24) | (format << 8));
-	if (ret != 0) {
-		LOG_ERR("Unable to set DAI format on ASP1");
-		return -EIO;
+	/* Derive CLK from FLL1 @ 49.152 MHz */
+	clk_config = 0x34C;
+	if (SAMPLE_RATE_11_025_kHz <= sample_rate && sample_rate <= SAMPLE_RATE_176_4_kHz) {
+		/* CLK_FRAC freq (45.1584 MHz) for 44.1kHz sample rates */
+		clk_config |= BIT(15);
 	}
 
-	/* Set the number of valid data bits per slot */
-	ret = cs47l63_write_spi_reg(&cfg->spi, CS47L63_REG_ASP1_DATA_CONTROL5, wordsize);
-	if (ret != 0) {
-		return -EIO;
-	}
+	const struct reg_value config[] = {
+		/* Configure SYSCLK */
+		{.reg = CS47L63_REG_SYSTEM_CLOCK1, .value = clk_config},
+		/* Setup channel word size and format on ASP1 */
+		{.reg = CS47L63_REG_ASP1_CONTROL2, .value = (wordsize << 24) | (format << 8)},
+		{.reg = CS47L63_REG_ASP1_DATA_CONTROL5, .value = wordsize},
+		{.reg = CS47L63_REG_SAMPLE_RATE1, .value = sample_rate},
+		/* Enable ASP1 Rx channel 1 */
+		{.reg = CS47L63_REG_ASP1_ENABLES1, .value = BIT(16)},
+		/* Route ASP1 Rx channel 1 to output */
+		{.reg = CS47L63_REG_OUT1L_INPUT1, .value = MIXER_SRC_ASP1_RX1},
+		/* Enable output path */
+		{.reg = CS47L63_REG_OUTPUT_ENABLE_1, .value = BIT(1)},
+		/* Unmute, 0dB out */
+		{.reg = CS47L63_REG_OUT1L_VOLUME_1, .value = 0x280},
+	};
 
-	/* Enable reception of channel 1 on ASP1 */
-	ret = cs47l63_write_spi_reg(&cfg->spi, CS47L63_REG_ASP1_ENABLES1, BIT(16));
+	ret = cs47l63_write_spi_regs(&cfg->spi, config, ARRAY_SIZE(config));
 	if (ret != 0) {
-		return -EIO;
-	}
-
-	ret = cs47l63_write_spi_reg(&cfg->spi, CS47L63_REG_SAMPLE_RATE1, sample_rate);
-	if (ret != 0) {
-		return -EIO;
-	}
-
-	/* Route ASP1 Rx channel 1 to the output */
-	ret = cs47l63_write_spi_reg(&cfg->spi, CS47L63_REG_OUT1L_INPUT1, MIXER_SRC_ASP1_RX1);
-	if (ret != 0) {
-		return -EIO;
-	}
-
-	/* Enable output data path */
-	ret = cs47l63_write_spi_reg(&cfg->spi, CS47L63_REG_OUTPUT_ENABLE_1, BIT(1));
-	if (ret != 0) {
-		return -EIO;
-	}
-
-	/* Unmute output */
-	ret = cs47l63_update_spi_reg(&cfg->spi, CS47L63_REG_OUT1L_VOLUME_1,
-				     BIT(9), BIT(9)|BIT(8));
-	if (ret != 0) {
+		LOG_ERR("Unable to set output configuration");
 		return -EIO;
 	}
 
@@ -284,9 +293,19 @@ static inline bool wait_gpio(const struct gpio_dt_spec *gpio, int expected_state
 
 static int cs47l63_init(const struct device *dev)
 {
+	const struct reg_value init_config[] = {
+		/* Configure GPIO1-4 for ASP1 (I2S function) with bus keeper */
+		{.reg = CS47L63_REG_GPIO1_CTRL1, .value = 0x60000000},
+		{.reg = CS47L63_REG_GPIO2_CTRL1, .value = 0x60000000},
+		{.reg = CS47L63_REG_GPIO3_CTRL1, .value = 0x60000000},
+		{.reg = CS47L63_REG_GPIO4_CTRL1, .value = 0x60000000},
+		/* FLL1 from internal osc, no divider, "detect" defaults */
+		{.reg = CS47L63_REG_FLL1_CONTROL2, .value = 0x88202004},
+		/* Enable FLL1 */
+		{.reg = CS47L63_REG_FLL1_CONTROL1, .value = BIT(0)},
+	};
 	const struct cs47l63_config *cfg = dev->config;
 	uint32_t devid[2];
-	uint32_t zeros[4];
 	int ret;
 
 	if (!spi_is_ready_dt(&cfg->spi)) {
@@ -332,27 +351,13 @@ static int cs47l63_init(const struct device *dev)
 		return -EIO;
 	}
 
-	if (devid[0] != 0x47A63) {
+	if (devid[0] != CS47L63_DEVID) {
 		LOG_WRN("Invalid device ID");
 		return -ENODEV;
 	}
 
 	LOG_DBG("Found CS47L63 rev %d.%d", (devid[1] >> 4) & 0xF, devid[1] & 0xF);
-
-	/* Set GPIO1-4 to pin-specific alternate function (ASP1) */
-	ret = cs47l63_write_spi_blob(&cfg->spi, CS47L63_REG_GPIO1_CTRL1,
-				     (const uint8_t *) zeros, 4);
-	if (ret != 0) {
-		LOG_ERR("Unable to setup GPIO1-4 to ASP1");
-		return -EIO;
-	}
-
-	/* Enable SYSCLK */
-	ret = cs47l63_update_spi_reg(&cfg->spi, CS47L63_REG_SYSTEM_CLOCK1, BIT(6), BIT(6));
-	if (ret != 0) {
-		LOG_ERR("Unable to enable SYSCLK");
-		return -EIO;
-	}
+	ret = cs47l63_write_spi_regs(&cfg->spi, init_config, ARRAY_SIZE(init_config));
 
 	return 0;
 }
@@ -361,7 +366,7 @@ static int cs47l63_init(const struct device *dev)
 
 #define CS47L63_INIT(inst)                                                \
 	static const struct cs47l63_config cs47l63_config_##inst = {      \
-		.spi = SPI_DT_SPEC_INST_GET(inst, CS47L63_SPI_OPMODE, 0), \
+		.spi = SPI_DT_SPEC_INST_GET(inst, CS47L63_SPI_OPMODE),    \
 		.reset_gpio = GPIO_DT_SPEC_INST_GET(inst, reset_gpios),   \
 		.irq_gpio = GPIO_DT_SPEC_INST_GET(inst, irq_gpios),       \
 	};                                                                \
