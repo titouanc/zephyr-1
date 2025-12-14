@@ -96,7 +96,7 @@ static void netmidi2_callback(struct netmidi2_session *session,
 
 #if defined(CONFIG_NET_SAMPLE_MIDI2_AUTH_NONE)
 /* Simple Network MIDI 2.0 endpoint without authentication */
-NETMIDI2_EP_DEFINE(midi_server, ump_ep_dt.name, NULL, 0);
+NETMIDI2_EP_DEFINE(midi_server, ump_ep_dt.name, NULL, htons(CONFIG_NET_SAMPLE_MIDI_HOST_PORT));
 
 #elif defined(CONFIG_NET_SAMPLE_MIDI2_AUTH_SHARED_SECRET)
 /* Network MIDI 2.0 endpoint with shared secret authentication */
@@ -105,7 +105,7 @@ BUILD_ASSERT(
 	"CONFIG_NET_SAMPLE_MIDI2_SHARED_SECRET must be not empty"
 );
 
-NETMIDI2_EP_DEFINE_WITH_AUTH(midi_server, ump_ep_dt.name, NULL, 0,
+NETMIDI2_EP_DEFINE_WITH_AUTH(midi_server, ump_ep_dt.name, NULL, htons(CONFIG_NET_SAMPLE_MIDI_HOST_PORT),
 	CONFIG_NET_SAMPLE_MIDI2_SHARED_SECRET);
 
 #elif defined(CONFIG_NET_SAMPLE_MIDI2_AUTH_USER_PASSWORD)
@@ -119,7 +119,7 @@ BUILD_ASSERT(
 	"CONFIG_NET_SAMPLE_MIDI2_PASSWORD must be not empty"
 );
 
-NETMIDI2_EP_DEFINE_WITH_USERS(midi_server, ump_ep_dt.name, NULL, 0,
+NETMIDI2_EP_DEFINE_WITH_USERS(midi_server, ump_ep_dt.name, NULL, htons(CONFIG_NET_SAMPLE_MIDI_HOST_PORT),
 	{.name = CONFIG_NET_SAMPLE_MIDI2_USERNAME,
 	 .password = CONFIG_NET_SAMPLE_MIDI2_PASSWORD});
 

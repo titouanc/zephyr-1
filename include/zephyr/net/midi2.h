@@ -38,6 +38,15 @@
  */
 #define NETMIDI2_NONCE_SIZE  16
 
+#define NETMIDI2_EP_COMMON_DEFINE(_var_name, _ep_name, _piid, _port, _n_peers) \
+	static struct netmidi2_session peers_of##_var_name[_n_peers]; \
+	static struct netmidi2_ep _var_name = { \
+		.name = (_ep_name), \
+		.piid = (_piid), \
+		.addr4.sin_port = (_port), \
+		.peers = peers_of##_var_name, \
+		.n_peers = (_n_peers),
+
 /**
  * @brief      Statically declare a Network (UDP) MIDI 2.0 endpoint host
  * @param      _var_name  The name of the variable holding the server data
@@ -47,10 +56,7 @@
  * @param      _port      The UDP port to listen to, or 0 for automatic assignment
  */
 #define NETMIDI2_EP_DEFINE(_var_name, _ep_name, _piid, _port) \
-	static struct netmidi2_ep _var_name = { \
-		.name = (_ep_name), \
-		.piid = (_piid), \
-		.addr4.sin_port = (_port), \
+	NETMIDI2_EP_COMMON_DEFINE(_var_name, (_ep_name), (_piid), (_port), CONFIG_NETMIDI2_HOST_MAX_CLIENTS) \
 		.auth_type = NETMIDI2_AUTH_NONE, \
 	}
 
@@ -65,10 +71,7 @@
  * @param      _secret    The shared secret key clients must provide to connect
  */
 #define NETMIDI2_EP_DEFINE_WITH_AUTH(_var_name, _ep_name, _piid, _port, _secret) \
-	static struct netmidi2_ep _var_name = { \
-		.name = (_ep_name), \
-		.piid = (_piid), \
-		.addr4.sin_port = (_port), \
+	NETMIDI2_EP_COMMON_DEFINE(_var_name, (_ep_name), (_piid), (_port), CONFIG_NETMIDI2_HOST_MAX_CLIENTS) \
 		.auth_type = NETMIDI2_AUTH_SHARED_SECRET, \
 		.shared_auth_secret = (_secret), \
 	}
@@ -95,10 +98,7 @@
 		.n_users = ARRAY_SIZE(((struct netmidi2_user []) { __VA_ARGS__ })), \
 		.users = { __VA_ARGS__ }, \
 	}; \
-	static struct netmidi2_ep _var_name = { \
-		.name = (_ep_name), \
-		.piid = (_piid), \
-		.addr4.sin_port = (_port), \
+	NETMIDI2_EP_COMMON_DEFINE(_var_name, (_ep_name), (_piid), (_port), CONFIG_NETMIDI2_HOST_MAX_CLIENTS) \
 		.auth_type = NETMIDI2_AUTH_USER_PASSWORD, \
 		.userlist = &users_of_##_var_name, \
 	}
@@ -217,8 +217,6 @@ struct netmidi2_ep {
 	/** The function to call when data is received from a client */
 	void (*rx_packet_cb)(struct netmidi2_session *session,
 			     const struct midi_ump ump);
-	/** List of peers to this endpoint */
-	struct netmidi2_session peers[CONFIG_NETMIDI2_HOST_MAX_CLIENTS];
 	/** The type of authentication required to establish a session
 	 *  with this host endpoint
 	 */
@@ -231,6 +229,9 @@ struct netmidi2_ep {
 		const struct netmidi2_userlist *userlist;
 	};
 #endif
+	size_t n_peers;
+	/** List of peers to this endpoint */
+	struct netmidi2_session *peers;
 };
 
 /**
@@ -239,6 +240,11 @@ struct netmidi2_ep {
  * @return     0 on success, -errno on error
  */
 int netmidi2_host_ep_start(struct netmidi2_ep *ep);
+
+
+struct netmidi2_session *netmidi2_ep_invite(struct netmidi2_ep *ep,
+					    struct net_sockaddr *host_addr,
+					    net_socklen_t host_addr_len);
 
 /**
  * @brief      Send a Universal MIDI Packet to all clients connected to the endpoint

@@ -196,7 +196,7 @@ static inline struct netmidi2_session *netmidi2_match_session(struct netmidi2_ep
 							      struct net_sockaddr *peer_addr,
 							      net_socklen_t peer_addr_len)
 {
-	for (size_t i = 0; i < CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
+	for (size_t i = 0; i < ep->n_peers; i++) {
 		if (ep->peers[i].addr_len == peer_addr_len &&
 		    memcmp(&ep->peers[i].addr, peer_addr, peer_addr_len) == 0) {
 			LOG_DBG("Found matching client session %d", i);
@@ -212,7 +212,7 @@ static inline void netmidi2_free_inactive_sessions(struct netmidi2_ep *ep)
 	struct netmidi2_session *sess;
 	const uint8_t bye_timeout[] = {COMMAND_BYE, 0, 0x04, 0};
 
-	for (size_t i = 0; i < CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
+	for (size_t i = 0; i < ep->n_peers; i++) {
 		sess = &ep->peers[i];
 		if (sess->state != NETMIDI2_SESSION_IDLE &&
 		    sess->state != NETMIDI2_SESSION_ESTABLISHED) {
@@ -230,7 +230,7 @@ static inline struct netmidi2_session *netmidi2_try_alloc_session(struct netmidi
 {
 	struct netmidi2_session *sess;
 
-	for (size_t i = 0; i < CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
+	for (size_t i = 0; i < ep->n_peers; i++) {
 		sess = &ep->peers[i];
 		if (sess->state == NETMIDI2_SESSION_NOT_INITIALIZED) {
 			sess->state = NETMIDI2_SESSION_IDLE;
@@ -562,6 +562,10 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 	}
 
 	switch (cmd_code) {
+	case COMMAND_NAK:
+		net_buf_pull_mem(rx, payload_len);
+		return 0;
+
 	case COMMAND_PING:
 		/* See netmidi10: 6.13 Ping */
 		if (payload_len_words != 1) {
@@ -625,6 +629,20 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 		netmidi2_send_invitation_reply(session, AUTH_STATE_FIRST_REQUEST);
 		return 0;
 #endif /* CONFIG_NETMIDI2_HOST_AUTH */
+
+	case COMMAND_INVITATION_REPLY_ACCEPTED:
+		session = netmidi2_match_session(ep, peer_addr, peer_addr_len);
+		if (!SESSION_HAS_STATE(session, NETMIDI2_SESSION_PENDING_INVITATION)) {
+			netmidi2_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_NOT_EXPECTED, cmd_header);
+			LOG_WRN("Invitation accepted for unknown session");
+			return -1;
+		};
+
+		session->state = NETMIDI2_SESSION_ESTABLISHED;
+		SESS_LOG_INF(session, "Established session");
+		net_buf_pull_mem(rx, payload_len);
+		return 0;
 
 	case COMMAND_BYE:
 		session = netmidi2_match_session(ep, peer_addr, peer_addr_len);
@@ -700,7 +718,7 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 		net_buf_pull(rx, payload_len);
 		netmidi2_quick_nak(ep, peer_addr, peer_addr_len,
 				   NAK_COMMAND_NOT_SUPPORTED, cmd_header);
-		return 0;
+		return -1;
 	}
 	return 0;
 }
@@ -793,7 +811,7 @@ int netmidi2_host_ep_start(struct netmidi2_ep *ep)
 		return -EIO;
 	}
 
-	for (size_t i = 0; i < CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
+	for (size_t i = 0; i < ep->n_peers; i++) {
 		k_work_init(&ep->peers[i].tx_work, netmidi2_session_tx_work);
 	}
 
@@ -810,9 +828,31 @@ int netmidi2_host_ep_start(struct netmidi2_ep *ep)
 	return 0;
 }
 
+struct netmidi2_session *netmidi2_ep_invite(struct netmidi2_ep *ep,
+					    struct net_sockaddr *host_addr,
+					    net_socklen_t host_addr_len)
+{
+	struct netmidi2_session *session = netmidi2_match_session(ep, host_addr, host_addr_len);
+	if (SESSION_HAS_STATE(session, NETMIDI2_SESSION_ESTABLISHED)) {
+		SESS_LOG_WRN(session, "Existing session, not inviting");
+		return session;
+	}
+
+	session = netmidi2_alloc_session(ep, host_addr, host_addr_len);
+	if (session == NULL) {
+		LOG_ERR("Unable to allocate new session, cannot invite");
+		return NULL;
+	}
+
+	session->state = NETMIDI2_SESSION_PENDING_INVITATION;
+	netmidi2_session_sendcmd(session, COMMAND_INVITATION, 0, NULL, 0);
+
+	return session;
+}
+
 void netmidi2_broadcast(struct netmidi2_ep *ep, const struct midi_ump ump)
 {
-	for (size_t i = 0; i < CONFIG_NETMIDI2_HOST_MAX_CLIENTS; i++) {
+	for (size_t i = 0; i < ep->n_peers; i++) {
 		if (ep->peers[i].state == NETMIDI2_SESSION_ESTABLISHED) {
 			netmidi2_send(&ep->peers[i], ump);
 		}
