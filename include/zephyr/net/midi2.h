@@ -57,6 +57,7 @@
  */
 #define NETMIDI2_EP_DEFINE(_var_name, _ep_name, _piid, _port) \
 	NETMIDI2_EP_COMMON_DEFINE(_var_name, (_ep_name), (_piid), (_port), CONFIG_NETMIDI2_HOST_MAX_CLIENTS) \
+		.accept_invitations = true, \
 		.auth_type = NETMIDI2_AUTH_NONE, \
 	}
 
@@ -72,6 +73,7 @@
  */
 #define NETMIDI2_EP_DEFINE_WITH_AUTH(_var_name, _ep_name, _piid, _port, _secret) \
 	NETMIDI2_EP_COMMON_DEFINE(_var_name, (_ep_name), (_piid), (_port), CONFIG_NETMIDI2_HOST_MAX_CLIENTS) \
+		.accept_invitations = true, \
 		.auth_type = NETMIDI2_AUTH_SHARED_SECRET, \
 		.shared_auth_secret = (_secret), \
 	}
@@ -99,8 +101,14 @@
 		.users = { __VA_ARGS__ }, \
 	}; \
 	NETMIDI2_EP_COMMON_DEFINE(_var_name, (_ep_name), (_piid), (_port), CONFIG_NETMIDI2_HOST_MAX_CLIENTS) \
+		.accept_invitations = true, \
 		.auth_type = NETMIDI2_AUTH_USER_PASSWORD, \
 		.userlist = &users_of_##_var_name, \
+	}
+
+#define NETMIDI2_EP_CLIENT_DEFINE(_var_name, _ep_name, _piid, _port) \
+	NETMIDI2_EP_COMMON_DEFINE(_var_name, (_ep_name), (_piid), (_port), 1) \
+		.accept_invitations = false, \
 	}
 
 struct netmidi2_ep;
@@ -198,6 +206,14 @@ enum netmidi2_auth_type {
 	NETMIDI2_AUTH_USER_PASSWORD,
 };
 
+struct netmidi2_ops {
+	/** The function to call when data is received from a client */
+	void (*rx_packet_cb)(struct netmidi2_session *session,
+			     const struct midi_ump ump);
+	void (*session_established_cb)(struct netmidi2_session *session);
+	void (*session_closed_cb)(struct netmidi2_session *session);
+};
+
 /**
  * @brief      A Network MIDI2.0 Endpoint
  */
@@ -206,6 +222,10 @@ struct netmidi2_ep {
 	const char *name;
 	/** The endpoint product instance id */
 	const char *piid;
+	/** True if this endpoint should accept invitations from clients */
+	bool accept_invitations;
+	/**  */
+	struct netmidi2_ops ops;
 	/** The local endpoint address */
 	union {
 		struct net_sockaddr addr;
@@ -214,9 +234,6 @@ struct netmidi2_ep {
 	};
 	/** The listening socket wrapped in a poll descriptor */
 	struct zsock_pollfd pollsock;
-	/** The function to call when data is received from a client */
-	void (*rx_packet_cb)(struct netmidi2_session *session,
-			     const struct midi_ump ump);
 	/** The type of authentication required to establish a session
 	 *  with this host endpoint
 	 */
@@ -234,6 +251,12 @@ struct netmidi2_ep {
 	struct netmidi2_session *peers;
 };
 
+static inline void netmidi2_set_ops(struct netmidi2_ep *ep,
+				    const struct netmidi2_ops *ops)
+{
+	memcpy(&ep->ops, ops, sizeof(struct netmidi2_ops));
+}
+
 /**
  * @brief      Start hosting a network (UDP) Universal MIDI Packet endpoint
  * @param      ep    The network endpoint to start
@@ -241,6 +264,10 @@ struct netmidi2_ep {
  */
 int netmidi2_host_ep_start(struct netmidi2_ep *ep);
 
+
+int netmidi2_session_invite(struct netmidi2_session *session);
+
+int netmidi2_session_bye(struct netmidi2_session *session);
 
 struct netmidi2_session *netmidi2_ep_invite(struct netmidi2_ep *ep,
 					    struct net_sockaddr *host_addr,
