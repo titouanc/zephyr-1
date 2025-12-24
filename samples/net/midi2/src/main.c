@@ -81,19 +81,6 @@ static inline void handle_ump_stream(struct netmidi2_session *session,
 	ump_stream_respond(&responder_cfg, ump);
 }
 
-static void netmidi2_callback(struct netmidi2_session *session,
-			      const struct midi_ump ump)
-{
-	switch (UMP_MT(ump)) {
-	case UMP_MT_MIDI1_CHANNEL_VOICE:
-		send_external_midi1(ump);
-		break;
-	case UMP_MT_UMP_STREAM:
-		handle_ump_stream(session, ump);
-		break;
-	}
-}
-
 #if defined(CONFIG_NET_SAMPLE_MIDI2_AUTH_NONE)
 /* Simple Network MIDI 2.0 endpoint without authentication */
 NETMIDI2_EP_DEFINE(midi_server, ump_ep_dt.name, NULL, htons(CONFIG_NET_SAMPLE_MIDI_HOST_PORT));
@@ -129,12 +116,36 @@ DNS_SD_REGISTER_SERVICE(midi_dns, CONFIG_NET_HOSTNAME "-" CONFIG_BOARD,
 			"_midi2", "_udp", "local", DNS_SD_EMPTY_TXT,
 			&midi_server.addr4.sin_port);
 
+static void rx_ump(struct netmidi2_session *session, const struct midi_ump ump)
+{
+	switch (UMP_MT(ump)) {
+	case UMP_MT_MIDI1_CHANNEL_VOICE:
+		send_external_midi1(ump);
+	case UMP_MT_UMP_STREAM:
+		handle_ump_stream(session, ump);
+		break;
+	}
+}
+
+static void session_established(struct netmidi2_session *session)
+{
+	LOG_INF("New client session established %p", session);
+}
+
+static void session_closed(struct netmidi2_session *session)
+{
+	LOG_INF("Client session closing %p", session);
+}
+
 int main(void)
 {
 	CONFIGURE_LED();
 
-	const struct netmidi2_ops ops = {.rx_packet_cb = netmidi2_callback};
-	netmidi2_set_ops(&midi_server, &ops);
+	netmidi2_set_ops(&midi_server, &((const struct netmidi2_ops) {
+		.rx_packet_cb = rx_ump,
+		.session_established_cb = session_established,
+		.session_closed_cb = session_closed,
+	}));
 	netmidi2_host_ep_start(&midi_server);
 
 	return 0;
