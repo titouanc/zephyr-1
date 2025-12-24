@@ -59,6 +59,16 @@ NET_BUF_POOL_DEFINE(netmidi2_pool, 2 + CONFIG_NETMIDI2_HOST_MAX_CLIENTS,
 #define NAK_COMMAND_MALFORMED		0x03
 #define NAK_BAD_PING_REPLY		0x20
 
+/* See netmidi10: 6.16 / Table 27: List of Bye Reaons */
+#define BYE_UNDEFINED 0x00
+#define BYE_USER_TERMINATED 0x01
+#define BYE_POWER_DOWN 0x02
+#define BYE_MUSSING_UMP 0x03
+#define BYE_TIMEOUT 0x04
+#define BYE_SESSION_NOT_ESTABLISHED 0x05
+#define BYE_NO_PENDING_SENSSION 0x06
+#define BYE_PROTOCOL_ERROR 0x07
+
 /* Logging macros that include the peer's address:port */
 #define SESS_LOG_DBG(_s, _fmt, ...) SESS_LOG(DBG, _s, _fmt, ##__VA_ARGS__)
 #define SESS_LOG_INF(_s, _fmt, ...) SESS_LOG(INFO, _s, _fmt, ##__VA_ARGS__)
@@ -71,7 +81,7 @@ NET_BUF_POOL_DEFINE(netmidi2_pool, 2 + CONFIG_NETMIDI2_HOST_MAX_CLIENTS,
 		const struct net_sockaddr_in6 *addr6 = net_sin6(addr); \
 		char __pn[NET_INET6_ADDRSTRLEN]; \
 		net_addr_ntop(addr->sa_family, &addr6->sin6_addr, __pn, sizeof(__pn)); \
-		NET_##_lvl("%s:%d " _fmt, __pn, htons(addr6->sin6_port), ##__VA_ARGS__); \
+		NET_##_lvl("%s:%d " _fmt, __pn, ntohs(addr6->sin6_port), ##__VA_ARGS__); \
 	} while (0)
 
 #define SESSION_HAS_STATE(session, expected_state) \
@@ -207,18 +217,23 @@ static inline struct netmidi2_session *netmidi2_match_session(struct netmidi2_ep
 	return NULL;
 }
 
+static inline void netmidi2_session_quick_bye(struct netmidi2_session *session, uint8_t reason)
+{
+	uint8_t pkt[] = {'M', 'I', 'D', 'I', COMMAND_BYE, 0, reason, 0};
+	zsock_sendto(session->ep->pollsock.fd, pkt, sizeof(pkt), 0,
+		     net_sad(&session->addr), session->addr_len);
+}
+
 static inline void netmidi2_free_inactive_sessions(struct netmidi2_ep *ep)
 {
 	struct netmidi2_session *sess;
-	const uint8_t bye_timeout[] = {COMMAND_BYE, 0, 0x04, 0};
 
 	for (size_t i = 0; i < ep->n_peers; i++) {
 		sess = &ep->peers[i];
 		if (sess->state != NETMIDI2_SESSION_IDLE &&
 		    sess->state != NETMIDI2_SESSION_ESTABLISHED) {
 			SESS_LOG_WRN(sess, "Cleanup inactive session");
-			zsock_sendto(ep->pollsock.fd, bye_timeout, sizeof(bye_timeout),
-				     0, net_sad(&sess->addr), sess->addr_len);
+			netmidi2_session_quick_bye(sess, BYE_TIMEOUT);
 			netmidi2_free_session(sess);
 		}
 	}
@@ -563,6 +578,7 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 
 	switch (cmd_code) {
 	case COMMAND_NAK:
+	case COMMAND_BYE_REPLY:
 		net_buf_pull_mem(rx, payload_len);
 		return 0;
 
@@ -581,6 +597,14 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 		return 0;
 
 	case COMMAND_INVITATION:
+		if (! ep->accept_invitations) {
+			netmidi2_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_NOT_SUPPORTED, cmd_header);
+			LOG_WRN("Not supporting invitations");
+			net_buf_pull_mem(rx, payload_len);
+			return -1;
+		}
+
 		/* See netmidi10: 6.13 Ping
 		 * We currently don't care about the peer's name or product
 		 * instance id. Simply pull the entire payload at once.
@@ -610,6 +634,14 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 
 	case COMMAND_INVITATION_WITH_AUTH:
 	case COMMAND_INVITATION_WITH_USER_AUTH:
+		if (! ep->accept_invitations) {
+			netmidi2_quick_nak(ep, peer_addr, peer_addr_len,
+					   NAK_COMMAND_NOT_SUPPORTED, cmd_header);
+			LOG_WRN("Not accepting invitation");
+			net_buf_pull_mem(rx, payload_len);
+			return -1;
+		}
+
 		/* See netmidi10: 6.9 - 6.10 Invitation with (User) Authentication */
 		session = netmidi2_match_session(ep, peer_addr, peer_addr_len);
 		if (!SESSION_HAS_STATE(session, NETMIDI2_SESSION_AUTH_REQUIRED)) {
@@ -641,6 +673,9 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 
 		session->state = NETMIDI2_SESSION_ESTABLISHED;
 		SESS_LOG_INF(session, "Established session");
+		if (ep->ops.session_established_cb != NULL) {
+			ep->ops.session_established_cb(session);
+		}
 		net_buf_pull_mem(rx, payload_len);
 		return 0;
 
@@ -655,6 +690,9 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 		net_buf_pull(rx, payload_len);
 		netmidi2_quick_reply(ep, peer_addr, peer_addr_len,
 				     COMMAND_BYE_REPLY, 0, NULL, 0);
+		if (ep->ops.session_closed_cb != NULL) {
+			ep->ops.session_closed_cb(session);
+		}
 		netmidi2_free_session(session);
 		return 0;
 
@@ -693,8 +731,8 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 			return -1;
 		}
 
-		if (ep->rx_packet_cb != NULL) {
-			ep->rx_packet_cb(session, ump);
+		if (ep->ops.rx_packet_cb != NULL) {
+			ep->ops.rx_packet_cb(session, ump);
 		}
 		return 0;
 
@@ -828,12 +866,35 @@ int netmidi2_host_ep_start(struct netmidi2_ep *ep)
 	return 0;
 }
 
+int netmidi2_session_invite(struct netmidi2_session *session)
+{
+	if (session->state >= NETMIDI2_SESSION_ESTABLISHED) {
+		LOG_ERR("Session is already established, cannot invite");
+		return -EBUSY;
+	}
+
+	session->state = NETMIDI2_SESSION_PENDING_INVITATION;
+	return netmidi2_session_sendcmd(session, COMMAND_INVITATION, 0, NULL, 0);
+}
+
+int netmidi2_session_bye(struct netmidi2_session *session)
+{
+	struct netmidi2_ep *ep = session->ep;
+	netmidi2_session_quick_bye(session, BYE_USER_TERMINATED);
+
+	if (ep->ops.session_closed_cb) {
+		ep->ops.session_closed_cb(session);
+	}
+
+	netmidi2_free_session(session);
+}
+
 struct netmidi2_session *netmidi2_ep_invite(struct netmidi2_ep *ep,
 					    struct net_sockaddr *host_addr,
 					    net_socklen_t host_addr_len)
 {
 	struct netmidi2_session *session = netmidi2_match_session(ep, host_addr, host_addr_len);
-	if (SESSION_HAS_STATE(session, NETMIDI2_SESSION_ESTABLISHED)) {
+	if (session && session->state >= NETMIDI2_SESSION_ESTABLISHED) {
 		SESS_LOG_WRN(session, "Existing session, not inviting");
 		return session;
 	}
@@ -844,9 +905,7 @@ struct netmidi2_session *netmidi2_ep_invite(struct netmidi2_ep *ep,
 		return NULL;
 	}
 
-	session->state = NETMIDI2_SESSION_PENDING_INVITATION;
-	netmidi2_session_sendcmd(session, COMMAND_INVITATION, 0, NULL, 0);
-
+	netmidi2_session_invite(session);
 	return session;
 }
 

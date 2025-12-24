@@ -133,7 +133,8 @@ int main(void)
 {
 	CONFIGURE_LED();
 
-	midi_server.rx_packet_cb = netmidi2_callback;
+	const struct netmidi2_ops ops = {.rx_packet_cb = netmidi2_callback};
+	netmidi2_set_ops(&midi_server, &ops);
 	netmidi2_host_ep_start(&midi_server);
 
 	return 0;
