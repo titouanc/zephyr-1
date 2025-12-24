@@ -31,17 +31,17 @@ static void rx_usb_midi(const struct device *dev, const struct midi_ump ump)
 static void endpoint_found(const struct netmidi2_disc_ep *srv)
 {
 	if (! srv->has_address) {
-		LOG_WRN("No IP address for endpoint %s", srv->name.host);
+		LOG_WRN("No IP address for endpoint %s", srv->target);
 		return;
 	}
 
 	if (! srv->has_port) {
-		LOG_WRN("No port for endpoint %s", srv->name.host);
+		LOG_WRN("No port for endpoint %s", srv->target);
 		return;
 	}
 
-	LOG_INF("Found %s.%s.%s.%s @ %d.%d.%d.%d:%d",
-		srv->name.host, srv->name.service, srv->name.proto, srv->name.domain,
+	LOG_INF("Found %s @ %d.%d.%d.%d:%d",
+		srv->target,
 		srv->addr.sin_addr.s4_addr[0], srv->addr.sin_addr.s4_addr[1],
 		srv->addr.sin_addr.s4_addr[2], srv->addr.sin_addr.s4_addr[3],
 		ntohs(srv->addr.sin_port));
