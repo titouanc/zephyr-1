@@ -168,6 +168,7 @@ void start_discovery(ep_found_cb cb)
 		return;
 	}
 
+	LOG_INF("Starting discovery");
 	global_disc_state.cb = cb;
 	global_disc_state.discovery_enabled = true;
 	k_work_init(&global_disc_state.work, discovery_work_fn);
@@ -176,6 +177,7 @@ void start_discovery(ep_found_cb cb)
 
 void stop_discovery()
 {
+	LOG_INF("Stopping discovery");
 	global_disc_state.discovery_enabled = false;
 	k_work_cancel(&global_disc_state.work);
 }
