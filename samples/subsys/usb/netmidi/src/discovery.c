@@ -12,9 +12,9 @@
 LOG_MODULE_REGISTER(sample_usb_net_midi_discovery, LOG_LEVEL_INF);
 
 struct disc_state {
-	struct k_work work;
+	struct k_work_delayable work;
 	bool discovery_enabled;
-	bool cb_called = false;
+	bool cb_called;
 	uint16_t discovery_id;
 	struct netmidi2_disc_ep srv;
 	ep_found_cb cb;
@@ -42,8 +42,6 @@ static void dns_result_cb(enum dns_resolve_status status,
 {
 	struct disc_state *state = user_data;
 
-	LOG_INF("DNS result callback status=%d", status);
-
 	if (status == DNS_EAI_INPROGRESS) {
 		extract_dns_info(info, &state->srv);
 	}
@@ -56,21 +54,23 @@ static void dns_result_cb(enum dns_resolve_status status,
 	}
 
 	if (status != DNS_EAI_INPROGRESS) {
-		k_work_submit(&state->work);
+		k_work_reschedule(&state->work, K_MSEC(500));
 	}
 }
 
 static void discovery_work_fn(struct k_work *work)
 {
-	struct disc_state *state = CONTAINER_OF(work, struct disc_state, work);
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct disc_state *state = CONTAINER_OF(dwork, struct disc_state, work);
 	struct dns_resolve_context *resolver = dns_resolve_get_default();
 
 	if (! state->discovery_enabled) {
 		return;
 	}
 
+	state->cb_called = false;
 	memset(&state->srv, 0, sizeof(struct netmidi2_disc_ep));
-	dns_resolve_service(resolver, "_midi2._udp.local", NULL,
+	dns_resolve_service(resolver, "_midi2._udp.local", &state->discovery_id,
 			    dns_result_cb, state, 2*MSEC_PER_SEC);
 }
 
@@ -86,15 +86,15 @@ void start_discovery(ep_found_cb cb)
 	LOG_INF("Starting discovery");
 	global_disc_state.cb = cb;
 	global_disc_state.discovery_enabled = true;
-	k_work_init(&global_disc_state.work, discovery_work_fn);
-	k_work_submit(&global_disc_state.work);
+	k_work_init_delayable(&global_disc_state.work, discovery_work_fn);
+	k_work_reschedule(&global_disc_state.work, K_NO_WAIT);
 }
 
 void stop_discovery()
 {
 	LOG_INF("Stopping discovery");
 	global_disc_state.discovery_enabled = false;
-	k_work_cancel(&global_disc_state.work);
+	k_work_cancel_delayable(&global_disc_state.work);
 }
 
 bool is_discovery_started()
