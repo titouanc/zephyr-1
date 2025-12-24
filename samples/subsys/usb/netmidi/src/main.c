@@ -160,5 +160,5 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_midi2,
 );
 
 /* Creating root (level 0) command "demo" */
-SHELL_CMD_REGISTER(midi2, &sub_midi2, "Demo commands", NULL);
+SHELL_CMD_REGISTER(demo, &sub_midi2, "Demo commands", NULL);
 

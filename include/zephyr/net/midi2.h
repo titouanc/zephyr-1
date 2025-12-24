@@ -40,7 +40,7 @@
 
 #define NETMIDI2_EP_COMMON_DEFINE(_var_name, _ep_name, _piid, _port, _n_peers) \
 	static struct netmidi2_session peers_of##_var_name[_n_peers]; \
-	static struct netmidi2_ep _var_name = { \
+	STRUCT_SECTION_ITERABLE(netmidi2_ep, _var_name) = { \
 		.name = (_ep_name), \
 		.piid = (_piid), \
 		.addr4.sin_port = (_port), \
@@ -267,7 +267,7 @@ int netmidi2_host_ep_start(struct netmidi2_ep *ep);
 
 int netmidi2_session_invite(struct netmidi2_session *session);
 
-int netmidi2_session_bye(struct netmidi2_session *session);
+void netmidi2_session_bye(struct netmidi2_session *session);
 
 struct netmidi2_session *netmidi2_ep_invite(struct netmidi2_ep *ep,
 					    struct net_sockaddr *host_addr,

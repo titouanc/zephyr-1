@@ -877,7 +877,7 @@ int netmidi2_session_invite(struct netmidi2_session *session)
 	return netmidi2_session_sendcmd(session, COMMAND_INVITATION, 0, NULL, 0);
 }
 
-int netmidi2_session_bye(struct netmidi2_session *session)
+void netmidi2_session_bye(struct netmidi2_session *session)
 {
 	struct netmidi2_ep *ep = session->ep;
 	netmidi2_session_quick_bye(session, BYE_USER_TERMINATED);
