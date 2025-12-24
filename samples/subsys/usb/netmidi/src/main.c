@@ -85,17 +85,15 @@ int main(void)
 		return -1;
 	}
 
-	const struct usbd_midi_ops usb_ops = {
+	usbd_midi_set_ops(usb_midi, &((const struct usbd_midi_ops) {
 		.rx_packet_cb = rx_usb_midi,
-	};
-	usbd_midi_set_ops(usb_midi, &usb_ops);
+	}));
 
-	const struct netmidi2_ops net_ops = {
+	netmidi2_set_ops(&net_midi, &((const struct netmidi2_ops) {
 		.rx_packet_cb = rx_net_midi,
 		.session_established_cb = session_established,
 		.session_closed_cb = session_closed,
-	};
-	netmidi2_set_ops(&net_midi, &net_ops);
+	}));
 	netmidi2_host_ep_start(&net_midi);
 
 	start_discovery(endpoint_found);
@@ -112,10 +110,12 @@ int cmd_midi2_discover(const struct shell *sh, int argc, char *argv[])
 			start_discovery(endpoint_found);
 		} else {
 			shell_print(sh, "Usage: %s [ 0/1 ]\n", argv[0]);
+			return -ENOEXEC;
 		}
 	}
 	shell_print(sh, "Discovery %s",
 		    is_discovery_started() ? "started" : "stopped");
+	return 0;
 }
 
 int cmd_midi2_current(const struct shell *sh, int argc, char *argv[])
@@ -130,6 +130,8 @@ int cmd_midi2_current(const struct shell *sh, int argc, char *argv[])
 		net_addr_ntop(addr->sa_family, &addr6->sin6_addr, peer, sizeof(peer));
 		shell_print(sh, "Session established to %s:%d", peer, ntohs(addr6->sin6_port));
 	}
+
+	return 0;
 }
 
 int cmd_midi2_bye(const struct shell *sh, int argc, char *argv[])
@@ -139,6 +141,8 @@ int cmd_midi2_bye(const struct shell *sh, int argc, char *argv[])
 	} else {
 		netmidi2_session_bye(established_session);
 	}
+
+	return 0;
 }
 
 /* Creating subcommands (level 1 command) array for command "demo". */
