@@ -9,7 +9,7 @@
 #include "discovery.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(sample_usb_net_midi_discovery, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(unmidi_disc, LOG_LEVEL_INF);
 
 struct disc_state {
 	struct k_work_delayable work;

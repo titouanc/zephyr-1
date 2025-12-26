@@ -13,13 +13,15 @@
 #include "discovery.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(sample_usb_net_midi, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(unmidi2, LOG_LEVEL_INF);
 
 static struct usbd_context *sample_usbd = NULL;
 static const struct device *const usb_midi = DEVICE_DT_GET(DT_NODELABEL(usb_midi));
 
 static struct netmidi2_session *established_session = NULL;
 NETMIDI2_EP_CLIENT_DEFINE(net_midi, "Zephyr MIDI USB<>Network", NULL, 0);
+
+static bool autodiscover = true;
 
 static void rx_usb_midi(const struct device *dev, const struct midi_ump ump)
 {
@@ -74,7 +76,9 @@ static void session_closed(struct netmidi2_session *session)
 		LOG_INF("USB disabled");
 	}
 	established_session = NULL;
-	start_discovery(endpoint_found);
+	if (autodiscover) {
+		start_discovery(endpoint_found);
+	}
 }
 
 int main(void)
@@ -118,6 +122,15 @@ int cmd_midi2_discover(const struct shell *sh, int argc, char *argv[])
 	return 0;
 }
 
+int cmd_midi2_autodiscover(const struct shell *sh, int argc, char *argv[])
+{
+	if (argc > 1) {
+		autodiscover = (argv[1][0] == '1');
+	}
+	shell_print(sh, "Auto-Discovery %s", autodiscover ? "enabled" : "disabled");
+	return 0;
+}
+
 int cmd_midi2_current(const struct shell *sh, int argc, char *argv[])
 {
 	if (established_session == NULL) {
@@ -150,6 +163,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_midi2,
 	SHELL_CMD(discover, NULL,
 		  "Discover MIDI2.0 endpoints on the local network",
 		  cmd_midi2_discover),
+	SHELL_CMD(autodiscover, NULL,
+		  "Discover MIDI2.0 endpoints on the local network",
+		  cmd_midi2_autodiscover),
 	SHELL_CMD(current, NULL,
 		  "Print current session (if any)",
 		  cmd_midi2_current),
