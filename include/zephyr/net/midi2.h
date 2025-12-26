@@ -207,10 +207,14 @@ enum netmidi2_auth_type {
 };
 
 struct netmidi2_ops {
-	/** The function to call when data is received from a client */
+	/** Data received on an endpoint session */
 	void (*rx_packet_cb)(struct netmidi2_session *session,
 			     const struct midi_ump ump);
+	/** New session established */
 	void (*session_established_cb)(struct netmidi2_session *session);
+	/** Session is closing. The session passed as argument will be freed
+	 *  right after the callback returns
+	 */
 	void (*session_closed_cb)(struct netmidi2_session *session);
 };
 
@@ -222,10 +226,6 @@ struct netmidi2_ep {
 	const char *name;
 	/** The endpoint product instance id */
 	const char *piid;
-	/** True if this endpoint should accept invitations from clients */
-	bool accept_invitations;
-	/**  */
-	struct netmidi2_ops ops;
 	/** The local endpoint address */
 	union {
 		struct net_sockaddr addr;
@@ -234,6 +234,14 @@ struct netmidi2_ep {
 	};
 	/** The listening socket wrapped in a poll descriptor */
 	struct zsock_pollfd pollsock;
+	/** True if this endpoint should accept invitations from clients */
+	bool accept_invitations;
+	/** Callbacks for user hooks */
+	struct netmidi2_ops ops;
+	/* Total number of peer sessions this endpoint has */
+	size_t n_peers;
+	/** List of peers to this endpoint */
+	struct netmidi2_session *peers;
 	/** The type of authentication required to establish a session
 	 *  with this host endpoint
 	 */
@@ -246,9 +254,6 @@ struct netmidi2_ep {
 		const struct netmidi2_userlist *userlist;
 	};
 #endif
-	size_t n_peers;
-	/** List of peers to this endpoint */
-	struct netmidi2_session *peers;
 };
 
 static inline void netmidi2_set_ops(struct netmidi2_ep *ep,
