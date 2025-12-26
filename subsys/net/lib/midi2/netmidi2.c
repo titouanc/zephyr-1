@@ -600,7 +600,7 @@ static int netmidi2_dispatch_cmdpkt(struct netmidi2_ep *ep,
 		if (! ep->accept_invitations) {
 			netmidi2_quick_nak(ep, peer_addr, peer_addr_len,
 					   NAK_COMMAND_NOT_SUPPORTED, cmd_header);
-			LOG_WRN("Not supporting invitations");
+			LOG_WRN("Not accepting invitations");
 			net_buf_pull_mem(rx, payload_len);
 			return -1;
 		}
@@ -880,13 +880,18 @@ int netmidi2_session_invite(struct netmidi2_session *session)
 void netmidi2_session_bye(struct netmidi2_session *session)
 {
 	struct netmidi2_ep *ep = session->ep;
-	netmidi2_session_quick_bye(session, BYE_USER_TERMINATED);
 
-	if (ep->ops.session_closed_cb) {
-		ep->ops.session_closed_cb(session);
+	if (session->state >= NETMIDI2_SESSION_ESTABLISHED) {
+		netmidi2_session_quick_bye(session, BYE_USER_TERMINATED);
+
+		if (ep->ops.session_closed_cb) {
+			ep->ops.session_closed_cb(session);
+		}
 	}
 
-	netmidi2_free_session(session);
+	if (session->state > NETMIDI2_SESSION_IDLE) {
+		netmidi2_free_session(session);
+	}
 }
 
 struct netmidi2_session *netmidi2_ep_invite(struct netmidi2_ep *ep,
@@ -920,6 +925,10 @@ void netmidi2_broadcast(struct netmidi2_ep *ep, const struct midi_ump ump)
 
 void netmidi2_send(struct netmidi2_session *sess, const struct midi_ump ump)
 {
+	if (sess->state != NETMIDI2_SESSION_ESTABLISHED){
+		return;
+	}
+
 	netmidi2_session_sendcmd(sess, COMMAND_UMP_DATA, sess->tx_ump_seq++,
 				 ump.data, UMP_NUM_WORDS(ump));
 }
