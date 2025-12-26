@@ -39,12 +39,12 @@
 #define NETMIDI2_NONCE_SIZE  16
 
 #define NETMIDI2_EP_COMMON_DEFINE(_var_name, _ep_name, _piid, _port, _n_peers) \
-	static struct netmidi2_session peers_of##_var_name[_n_peers]; \
+	static struct netmidi2_session peers_of_##_var_name[_n_peers]; \
 	STRUCT_SECTION_ITERABLE(netmidi2_ep, _var_name) = { \
 		.name = (_ep_name), \
 		.piid = (_piid), \
 		.addr4.sin_port = (_port), \
-		.peers = peers_of##_var_name, \
+		.peers = peers_of_##_var_name, \
 		.n_peers = (_n_peers),
 
 /**
