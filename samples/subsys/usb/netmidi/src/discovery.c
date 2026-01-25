@@ -54,7 +54,7 @@ static void dns_result_cb(enum dns_resolve_status status,
 	}
 
 	if (status != DNS_EAI_INPROGRESS) {
-		k_work_reschedule(&state->work, K_MSEC(500));
+		k_work_reschedule(&state->work, K_MSEC(CONFIG_NETMIDI2_DISCOVER_RETRY_DELAY));
 	}
 }
 
@@ -71,7 +71,7 @@ static void discovery_work_fn(struct k_work *work)
 	state->cb_called = false;
 	memset(&state->srv, 0, sizeof(struct netmidi2_disc_ep));
 	dns_resolve_service(resolver, "_midi2._udp.local", &state->discovery_id,
-			    dns_result_cb, state, 2*MSEC_PER_SEC);
+			    dns_result_cb, state, CONFIG_NETMIDI2_DISCOVER_TIMEOUT * MSEC_PER_SEC);
 }
 
 static struct disc_state global_disc_state;

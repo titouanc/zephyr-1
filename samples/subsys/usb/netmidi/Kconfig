@@ -6,8 +6,12 @@
 # tree, you cannot use them in your own application.
 source "samples/subsys/usb/common/Kconfig.sample_usbd"
 
-config NET_SAMPLE_MIDI_HOST_PORT
-	int "Host port"
-	default 45486
+config NETMIDI2_DISCOVER_TIMEOUT
+	int "Network MIDI 2.0 discovery timeout (ms)"
+	default 200
+
+config NETMIDI2_DISCOVER_RETRY_DELAY
+	int "Network MIDI 2.0 discovery retry delay (ms)"
+	default 500
 
 source "Kconfig.zephyr"
