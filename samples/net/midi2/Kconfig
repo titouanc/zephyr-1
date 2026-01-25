@@ -3,6 +3,10 @@
 
 menu "Networking MIDI2 sample application"
 
+config NET_SAMPLE_MIDI_HOST_PORT
+	int "Host MIDI2 endpoint on this port"
+	default 45486
+
 choice NET_SAMPLE_MIDI2_AUTH_TYPE
 	prompt "UMP Endpoint authentication method"
 	default NET_SAMPLE_MIDI2_AUTH_NONE

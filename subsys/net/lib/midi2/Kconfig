@@ -27,6 +27,10 @@ config NETMIDI2_HOST_AUTH
 	select CRYPTO
 	select CRYPTO_MBEDTLS_SHIM
 
+config NETMIDI2_SHELL
+	bool "Network MIDI2 shell"
+	depends on SHELL
+
 module=NET_MIDI2
 module-dep=NET_LOG
 module-str=Log level for network MIDI2

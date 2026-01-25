@@ -1,0 +1,38 @@
+0000 | 0000
+0002 | 8400
+0004 | 0000
+0006 | 0001
+0008 | 0000
+000A | 0003
+     | =======================================
+000C | 06 5f6d69646932 04 5f756470 05 6c6f63616c 00  -- Subject: service="_midi2" proto="_udp" domain="local"
+001F | 000c                                          -- Type: PTR
+0021 | 0001                                          -- Class: IN
+0023 | 00001194                                      -- TTL: 4500s
+0027 | 0017                                          -- Data length = 23 
+0029 | 14 506c6f7069706c6f702d6e61746976655f73696d   -- name="Plopiplop-native_sim"
+003E | c00c                                          -- See [0x0c] (service="_midi2" proto="_udp" domain="local")
+     | ---------------------------------------
+0040 | c029                                          -- Subject: See [0x29] (name="Plopiplop-native_sim")
+0042 | 0010                                          -- Type: TXT
+0044 | 8001                                          -- Class: IN; flush
+0046 | 00001194                                      -- TTL: 4500s
+004A | 0000                                          -- Data length=0
+     | ---------------------------------------
+004C | c029                                          -- Subject: See [0x29] (name="Plopiplop-native_sim")
+004E | 0021                                          -- Type: SRV
+0050 | 8001                                          -- class IN; flush
+0052 | 00000078                                      -- TTL: 120s
+0056 | 001d                                          -- Data length=29
+0058 | 0000                                          -- Priority 0
+005A | 0000                                          -- weight 0
+005C | b1ae                                          -- port 45486
+005E | 14 506c6f7069706c6f702d6e61746976655f73696d   -- "Plopiplop-native_sim"
+0071 | c018                                          -- See [0x18] (domain="local")
+     | ---------------------------------------
+0073 | c05e                                          -- See [0x5E]
+0075 | 0001                                          -- Type A
+0077 | 8001                                          -- class IN; flush
+0079 | 00000078                                      -- TTL
+007D | 0004                                          -- Data length: 4
+007F | c0000203                                      -- IP address: 192.0.2.3
