@@ -1,0 +1,37 @@
+name: Network echo samples
+
+.common-config: &common-config
+  ETH_NATIVE_TAP_RANDOM_MAC: n
+  NET_CONFIG_NEED_IPV6: n
+  NET_IPV6: n
+
+networks:
+  zeth:
+    host-veth: true
+    ipv4: 192.0.2.0/24  # or false for no ipv4 addressing
+    ipv6: 2001:db8::/56 # or false for no ipv6 addressing
+
+applications:
+  server:
+    source: samples/net/sockets/echo_server
+    board: qemu_cortex_m3
+    network: zeth
+    extra-build:
+      config:
+        <<: *common-config
+
+  client:
+    source: samples/net/sockets/echo_client
+    board: native_sim  # The default
+    network: zeth
+    extra-run:
+      args:
+        - --device_id=42
+    extra-build:
+      snippets:
+        - usbip-native-sim
+      args:
+        - -DEXTRA_DTC_OVERLAY_FILE=app.overlay
+      config:
+        <<: *common-config
+        NET_CONFIG_PEER_IPV4_ADDR: ${server:ipv4}

@@ -1,0 +1,17 @@
+name: Network echo samples
+
+networks:
+  zeth:
+    host-veth: true
+
+applications:
+  server:
+    source: samples/net/sockets/echo_server
+    network: zeth
+
+  client:
+    source: samples/net/sockets/echo_client
+    network: zeth
+    extra-build:
+      config:
+        NET_CONFIG_PEER_IPV4_ADDR: ${server:ipv4}
