@@ -40,6 +40,7 @@ each command.
    alias.rst
    extensions.rst
    build-flash-debug.rst
+   compose.rst
    sign.rst
    zephyr-cmds.rst
    why.rst
