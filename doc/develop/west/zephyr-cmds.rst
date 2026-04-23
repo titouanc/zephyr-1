@@ -244,6 +244,147 @@ Twister can then be invoked via west as follows::
   west twister -help
   west twister -T tests/ztest/base
 
+.. _west-compose:
+
+Orchestrating multiple applications: ``west compose``
+*****************************************************
+
+The ``compose`` command orchestrates a group of Zephyr applications declared
+in a single YAML file, conceptually similar to ``docker compose``. It builds,
+runs and tears down the applications together on the developer's machine,
+optionally wiring them to one or more virtual Ethernet networks made of Linux
+bridges, ``veth`` pairs and ``tap`` interfaces.
+
+This first version targets host simulation (:ref:`native_sim <native_sim>`)
+and host-side emulators such as QEMU. It has only been tested on Linux.
+
+Compose file
+============
+
+By default, ``west compose`` reads ``west-compose.yml`` from the current
+directory. Use ``-f/--file`` to point at another file. The file has three
+top-level keys:
+
+.. code-block:: yaml
+
+   name: Network echo samples           # required, free-form (slugified
+                                        # for the state directory)
+
+   networks:
+     zeth:
+       type: bridge                     # only "bridge" is supported today
+       host-veth: true                  # add a veth so the host can reach
+                                        # the network (default: false)
+       ipv4: 192.0.2.0/24               # or `false` to disable IPv4
+       ipv6: 2001:db8::/64              # or `false` to disable IPv6
+
+   applications:
+     server:
+       source: samples/net/sockets/echo_server
+       board: native_sim                # the default
+       network: zeth
+       extra-build:
+         snippets:                      # -S <snippet>
+           - usbip-native-sim
+         args:                          # forwarded after `--`
+           - -DEXTRA_DTC_OVERLAY_FILE=app.overlay
+         config:                        # injected as -DCONFIG_<KEY>=<VALUE>
+           NET_IPV6: n
+       extra-run:
+         args:                          # appended to the run command
+           - --device_id=42
+
+     client:
+       source: samples/net/sockets/echo_client
+       network: zeth
+       extra-build:
+         config:
+           NET_CONFIG_PEER_IPV4_ADDR: ${server:ipv4}
+
+Network-attached applications get a per-app TAP interface, MAC address and
+IPv4/IPv6 address allocated from the network's subnet. On ``native_sim``,
+the matching ``CONFIG_ETH_NATIVE_TAP_*`` and ``CONFIG_NET_CONFIG_*`` Kconfig
+values are injected automatically; any value you set under ``extra-build.config``
+wins over the auto-injected one.
+
+The ``${app:prop}`` syntax substitutes another application's allocated
+``ipv4``, ``ipv6`` or ``mac`` in string fields under ``extra-build.args``,
+``extra-build.config`` and ``extra-run.args``. This is how the ``client``
+above learns the server's IPv4 address.
+
+Actions
+=======
+
+.. code-block:: console
+
+   west compose [-f FILE] [-p] ACTION [APP]
+
+Global options:
+
+- ``-f, --file FILE``: path to the compose file (default ``./west-compose.yml``)
+- ``-p, --pristine``: forward ``-p always`` to every ``west build`` invocation
+
+Actions:
+
+``show``
+   Print the resolved context: networks (with their live bridge status),
+   applications, the interface/MAC/IPv4/IPv6 assigned to each.
+
+``up``
+   Create the Linux bridges, ``veth`` pairs and ``tap`` interfaces described
+   by ``networks``, and hand the ``tap`` interfaces to the current user.
+   Requires ``sudo``; the individual ``ip`` commands are printed before they
+   run. Safe to re-invoke — existing interfaces are reused.
+
+``down``
+   Tear down everything ``up`` created, in reverse order. Refuses to run if
+   any application launched by a previous ``run`` is still alive.
+
+``build [APP]``
+   Build one application, or every application in parallel when ``APP`` is
+   omitted. Parallel builds show a per-app ``tqdm`` progress bar driven by
+   the ``[N/M]`` lines from Ninja; on the first failure, the output of the
+   failing build is dumped and the siblings are terminated.
+
+``run [APP]``
+   Build (incrementally, unless ``-p`` is passed) then run one or all
+   applications. On ``native_sim``, the command launches
+   :file:`build/zephyr/zephyr.exe`; on other boards it falls back to
+   ``west build -t run``. Output is prefixed with a color per application
+   and tee'd to :file:`.compose/<slug>/<app>/run.log`. ``Ctrl-C`` is
+   forwarded to every child. The action fails fast if the network was not
+   brought ``up`` first, since that step requires root and is intentionally
+   kept separate.
+
+``clean [APP]``
+   Run ``west build -t clean`` on one or every build directory.
+
+``menuconfig APP``
+   Run ``west build -t menuconfig`` on ``APP``'s build directory.
+
+``console APP``
+   Attach ``picocom`` to the pseudo-TTY an application is using. ``west
+   compose`` scans :file:`run.log` for a ``/dev/pts/N`` path — this works
+   for any application that prints ``uart_native_tty``-style
+   ``connected to pseudotty: /dev/pts/N`` lines.
+
+``attach-usb [APP]``
+   Run ``sudo usbip attach`` against one or every application, using the
+   app's allocated IPv4 address as the USB/IP host. Requires an IPv4 address
+   on the application (so the app must be on a network) and a running
+   ``usbipd`` inside the application, e.g. via the ``usbip-native-sim``
+   snippet.
+
+State
+=====
+
+Build and run artefacts live under :file:`.compose/<slug>/` next to the
+compose file, where ``<slug>`` is the slugified top-level ``name``. Inside,
+each app has its own :file:`<app>/build/` directory and :file:`<app>/run.log`.
+The shared :file:`state.json` tracks which networks are up and which app
+PIDs are alive; it is what makes ``down`` refuse to run while apps are
+still alive.
+
 .. _west-bindesc:
 
 Working with binary descriptors: ``west bindesc``
