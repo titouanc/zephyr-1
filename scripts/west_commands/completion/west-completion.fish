@@ -193,7 +193,8 @@ function __zephyr_west_complete_help
                     "sdk" "manage SDKs" \
                     "packages" "manage packages for Zephyr" \
                     "patch" "manage patches for Zephyr modules" \
-                    "gtags" "create a GNU global tags file for the current workspace"
+                    "gtags" "create a GNU global tags file for the current workspace" \
+                    "compose" "orchestrate multiple Zephyr applications"
     set -l nb_ext_cmds (count $ext_cmds)
 
     if __zephyr_west_check_if_in_workspace
@@ -678,3 +679,38 @@ complete -c west -n "__zephyr_west_seen_subcommand_from sdk; and __fish_seen_sub
 complete -c west -n "__zephyr_west_seen_subcommand_from sdk; and __fish_seen_subcommand_from install" -o H -l no-hosttools -d "do not install host-tools"
 complete -c west -n "__zephyr_west_seen_subcommand_from sdk; and __fish_seen_subcommand_from install" -l personal-access-token -d "GitHub personal access token"
 complete -c west -n "__zephyr_west_seen_subcommand_from sdk; and __fish_seen_subcommand_from install" -l api-url -d "GitHub releases API endpoint URL"
+
+# compose
+function __zephyr_west_compose_file
+    set -l file ./west-compose.yml
+    set -l cmd (commandline -opc)
+    set -l n (count $cmd)
+    for idx in (seq 1 $n)
+        switch $cmd[$idx]
+            case -f --file
+                if test (math $idx + 1) -le $n
+                    set file $cmd[(math $idx + 1)]
+                end
+        end
+    end
+    echo $file
+end
+
+function __zephyr_west_compose_apps
+    set -l file (__zephyr_west_compose_file)
+    test -r $file; or return
+    awk '
+        /^applications:/ { in_apps = 1; next }
+        in_apps && /^[^[:space:]]/ { in_apps = 0 }
+        in_apps && /^  [a-zA-Z0-9_-]+:/ { sub(":.*", ""); sub("^[[:space:]]+", ""); print }
+    ' $file
+end
+
+set -l compose_actions show up down build run clean menuconfig attach-usb console
+set -l compose_actions_with_app build run clean menuconfig attach-usb console
+
+complete -c west -n "__zephyr_west_use_subcommand; and __zephyr_west_check_if_in_workspace" -ra compose -d "orchestrate multiple Zephyr applications"
+complete -c west -n "__zephyr_west_seen_subcommand_from compose" -s f -l file -rF -d "path to the compose YAML file"
+complete -c west -n "__zephyr_west_seen_subcommand_from compose" -s p -l pristine -d "pristine build"
+complete -c west -n "__zephyr_west_seen_subcommand_from compose; and not __fish_seen_subcommand_from $compose_actions" -ra "show\t'print the resolved compose context' up\t'create networks (needs sudo)' down\t'tear down networks' build\t'build one or every application' run\t'build and run one or every application' clean\t'clean build directories' menuconfig\t'run menuconfig for an application' attach-usb\t'attach a remote USB device (usbip)' console\t'attach picocom to an application pseudo-TTY'"
+complete -c west -n "__zephyr_west_seen_subcommand_from compose; and __fish_seen_subcommand_from $compose_actions_with_app" -ra "(__zephyr_west_compose_apps)"

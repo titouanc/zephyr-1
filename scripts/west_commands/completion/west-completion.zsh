@@ -47,6 +47,7 @@ _west_cmds() {
   'patch[manage patches for Zephyr modules]'
   'gtags[create a GNU global tags file for the current workspace]'
   'twister[run Twister test runner]'
+  'compose[orchestrate multiple Zephyr applications]'
   )
 
   local -a all_cmds=(${builtin_cmds} ${zephyr_ext_cmds})
@@ -662,6 +663,70 @@ _west_bindesc_list() {
 _west_bindesc_get_offset() {
   _arguments -S \
     '*:image:_files'
+}
+
+_west_compose_apps() {
+  local compose_file
+  if [[ -n "${_opt_args[-f]}" ]]; then
+    compose_file="${_opt_args[-f]}"
+  elif [[ -n "${_opt_args[--file]}" ]]; then
+    compose_file="${_opt_args[--file]}"
+  else
+    compose_file="./west-compose.yml"
+  fi
+
+  local -a apps
+  if [[ -r "$compose_file" ]]; then
+    apps=(${(f)"$(awk '
+      /^applications:/ { in_apps = 1; next }
+      in_apps && /^[^[:space:]]/ { in_apps = 0 }
+      in_apps && /^  [a-zA-Z0-9_-]+:/ { sub(":.*", ""); sub("^[[:space:]]+", ""); print }
+    ' "$compose_file" 2>/dev/null)"})
+  fi
+  _describe 'application' apps
+}
+
+_west_compose() {
+  local -a opts=(
+  '(-f --file)'{-f,--file}'[path to the compose YAML file]:file:_files'
+  '(-p --pristine)'{-p,--pristine}'[pristine build]'
+  )
+
+  local -a actions=(
+  'show:print the resolved compose context'
+  'up:create networks (bridges, veths, taps) — needs sudo'
+  'down:tear down networks'
+  'build:build one or every application'
+  'run:build and run one or every application'
+  'clean:clean one or every build directory'
+  'menuconfig:run menuconfig for an application'
+  'attach-usb:attach a remote USB device (usbip) to an application'
+  'console:attach picocom to an application pseudo-TTY'
+  )
+
+  local context state line
+  typeset -A opt_args
+
+  _arguments -S -C \
+    $opts \
+    '1:action:->actions' \
+    '*::arg:->args'
+
+  case $state in
+  actions)
+    _describe 'action' actions
+    ;;
+  args)
+    case "$line[1]" in
+      build|run|clean|attach-usb|menuconfig|console)
+        _arguments -S $opts '1:application:_west_compose_apps'
+        ;;
+      *)
+        _arguments -S $opts
+        ;;
+    esac
+    ;;
+  esac
 }
 
 # don't run the completion function when being source-ed or eval-ed

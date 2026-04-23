@@ -1200,6 +1200,98 @@ __comp_west_sdk()
 	esac
 }
 
+__comp_west_compose()
+{
+	local actions="show up down build run clean menuconfig attach-usb console"
+
+	local bool_opts="
+		--pristine -p
+	"
+
+	local file_opts="
+		--file -f
+	"
+
+	all_opts="$bool_opts $file_opts"
+
+	# Find the position of "compose" in the command line so we can
+	# detect whether an ACTION (and optional APP) has already been typed.
+	local compose_pos=0 i
+	for (( i=0; i < cword; i++ )); do
+		if [ "${words[$i]}" = "compose" ]; then
+			compose_pos=$i
+			break
+		fi
+	done
+
+	# Walk the tokens after `compose`, skipping flags (and their values),
+	# to find the ACTION token, then the APP token.
+	local action="" app_slot_filled=0 j=$((compose_pos + 1)) tok
+	while [ "$j" -lt "$cword" ]; do
+		tok="${words[$j]}"
+		case "$tok" in
+			-f|--file)
+				(( j += 2 ))
+				continue
+				;;
+			-p|--pristine)
+				(( j++ ))
+				continue
+				;;
+			-*)
+				(( j++ ))
+				continue
+				;;
+		esac
+		if [ -z "$action" ]; then
+			action="$tok"
+		else
+			app_slot_filled=1
+		fi
+		(( j++ ))
+	done
+
+	case "$prev" in
+		-f|--file)
+			__set_comp_files
+			return
+			;;
+	esac
+
+	if [ -z "$action" ]; then
+		case "$cur" in
+			-*)
+				__set_comp $all_opts
+				;;
+			*)
+				__set_comp $actions
+				;;
+		esac
+		return
+	fi
+
+	# An ACTION is present — complete its APP argument (or nothing) unless
+	# the user is still typing an option.
+	if [ "$app_slot_filled" -eq 0 ]; then
+		case "$action" in
+			build|run|clean|menuconfig|attach-usb|console)
+				case "$cur" in
+					-*)
+						__set_comp $all_opts
+						;;
+				esac
+				return
+				;;
+		esac
+	fi
+
+	case "$cur" in
+		-*)
+			__set_comp $all_opts
+			;;
+	esac
+}
+
 __comp_west()
 {
 	local previous_extglob_setting=$(shopt -p extglob)
@@ -1244,6 +1336,7 @@ __comp_west()
 		packages
 		patch
 		gtags
+		compose
 	)
 
 	local cmds=(${builtin_cmds[*]} ${zephyr_ext_cmds[*]})
