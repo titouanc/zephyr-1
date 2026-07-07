@@ -1,0 +1,33 @@
+# Copyright (c) 2026 Titouan Christophe
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  STM32 low-power timer (LPTIM) PWM.
+
+  Only the 2-channel LPTIM variant (LPTIM1/2/3 on H7R/S) is supported: the
+  channel cell must be 1 or 2. LPTIM4/5, which expose a single WAVPOL-polarity
+  output instead of addressable channels, are not supported by this binding.
+
+compatible: "st,stm32-lptim-pwm"
+
+include: [pwm-controller.yaml, base.yaml, pinctrl-device.yaml]
+
+properties:
+  pinctrl-0:
+    required: true
+
+  pinctrl-names:
+    required: true
+
+  "#pwm-cells":
+    const: 3
+    description: |
+      Number of items to expect in a PWM
+      - channel of the LPTIM used for PWM (1 or 2)
+      - period to set in ns
+      - flags: PWM_POLARITY_NORMAL or PWM_POLARITY_INVERTED
+
+pwm-cells:
+  - channel
+  - period
+  - flags

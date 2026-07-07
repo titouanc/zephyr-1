@@ -1,0 +1,15 @@
+# STM32 LPTIM PWM configuration options
+
+# Copyright (c) 2026 Titouan Christophe
+# SPDX-License-Identifier: Apache-2.0
+
+config PWM_STM32_LPTIM
+	bool "STM32 LPTIM PWM driver"
+	default y
+	depends on DT_HAS_ST_STM32_LPTIM_PWM_ENABLED
+	select RESET
+	select PINCTRL
+	help
+	  This option enables the PWM driver for the low-power timer (LPTIM)
+	  peripheral found on some STM32 MCUs. Say y if you wish to generate
+	  PWM output from an LPTIM instance.
