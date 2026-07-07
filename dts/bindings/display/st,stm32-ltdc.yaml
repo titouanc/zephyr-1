@@ -21,6 +21,12 @@ properties:
       Backlight on/off GPIO pin.
       Configure the GPIO polarity (active high/active low) according to LCD datasheet.
 
+  pwms:
+    type: phandle-array
+
+  pwm-names:
+    type: string-array
+
   ext-sdram:
     type: phandle
     description: |
