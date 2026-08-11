@@ -62,6 +62,8 @@ struct stream {
 struct i2s_stm32_data {
 	struct stream rx;
 	struct stream tx;
+	/* true while RX and TX are jointly driven in STM32H7 full duplex mode */
+	bool full_duplex;
 };
 
 /* checks that DMA Tx packet is fully transmitted over the I2S */

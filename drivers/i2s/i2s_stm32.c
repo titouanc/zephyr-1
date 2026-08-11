@@ -58,6 +58,8 @@ static int queue_put(struct k_msgq *q, void *mem_block, size_t size, int32_t tim
 	return k_msgq_put(q, &item, SYS_TIMEOUT_MS(timeout));
 }
 
+static int trigger_both(const struct device *dev, enum i2s_trigger_cmd cmd);
+
 static void stream_queue_drop(struct stream *s)
 {
 	size_t size;
@@ -148,11 +150,10 @@ static int i2s_stm32_set_clock(const struct device *dev,
 	return 0;
 }
 
-static int i2s_stm32_configure(const struct device *dev, enum i2s_dir dir,
-			       const struct i2s_config *i2s_cfg)
+static int i2s_stm32_configure_stream(const struct device *dev, struct stream *stream,
+				      const struct i2s_config *i2s_cfg)
 {
 	const struct i2s_stm32_cfg *const cfg = dev->config;
-	struct i2s_stm32_data *const dev_data = dev->data;
 	/* For words greater than 16-bit the channel length is considered 32-bit */
 	const uint32_t channel_length = i2s_cfg->word_size > 16U ? 32U : 16U;
 	const uint32_t word_size_bytes = channel_length / 8;
@@ -165,21 +166,9 @@ static int i2s_stm32_configure(const struct device *dev, enum i2s_dir dir,
 		((i2s_cfg->format & I2S_FMT_DATA_FORMAT_MASK) == I2S_FMT_DATA_FORMAT_I2S)
 			? 2U
 			: i2s_cfg->channels;
-	struct stream *stream;
 	uint32_t bit_clk_freq;
 	bool enable_mck;
 	int ret;
-
-	if (dir == I2S_DIR_RX) {
-		stream = &dev_data->rx;
-	} else if (dir == I2S_DIR_TX) {
-		stream = &dev_data->tx;
-	} else if (dir == I2S_DIR_BOTH) {
-		return -ENOSYS;
-	} else {
-		LOG_ERR("Either RX or TX direction must be selected");
-		return -EINVAL;
-	}
 
 	if (stream->state != I2S_STATE_NOT_READY &&
 	    stream->state != I2S_STATE_READY) {
@@ -289,6 +278,41 @@ static int i2s_stm32_configure(const struct device *dev, enum i2s_dir dir,
 	return 0;
 }
 
+static int i2s_stm32_configure(const struct device *dev, enum i2s_dir dir,
+			       const struct i2s_config *i2s_cfg)
+{
+	struct i2s_stm32_data *const dev_data = dev->data;
+	int ret;
+
+	if (dir == I2S_DIR_RX) {
+		return i2s_stm32_configure_stream(dev, &dev_data->rx, i2s_cfg);
+	} else if (dir == I2S_DIR_TX) {
+		return i2s_stm32_configure_stream(dev, &dev_data->tx, i2s_cfg);
+	} else if (dir == I2S_DIR_BOTH) {
+		if (!DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_i2s)) {
+			/*
+			 * Simultaneous RX+TX on a single I2S peripheral requires
+			 * the STM32H7 SPI/I2S full duplex hardware support.
+			 */
+			return -ENOSYS;
+		}
+
+		/*
+		 * H7 full duplex mode shares a single I2SCFGR register between
+		 * RX and TX, so both streams are configured from the same cfg.
+		 */
+		ret = i2s_stm32_configure_stream(dev, &dev_data->rx, i2s_cfg);
+		if (ret < 0) {
+			return ret;
+		}
+
+		return i2s_stm32_configure_stream(dev, &dev_data->tx, i2s_cfg);
+	}
+
+	LOG_ERR("Either RX or TX direction must be selected");
+	return -EINVAL;
+}
+
 static const struct i2s_config *i2s_stm32_config_get(const struct device *dev,
 						     enum i2s_dir dir)
 {
@@ -317,14 +341,24 @@ static int i2s_stm32_trigger(const struct device *dev, enum i2s_dir dir,
 	unsigned int key;
 	int ret;
 
+	if (dir == I2S_DIR_BOTH) {
+		if (!DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_i2s)) {
+			return -ENOSYS;
+		}
+		return trigger_both(dev, cmd);
+	}
+
 	if (dir == I2S_DIR_RX) {
 		stream = &dev_data->rx;
 	} else if (dir == I2S_DIR_TX) {
 		stream = &dev_data->tx;
-	} else if (dir == I2S_DIR_BOTH) {
-		return -ENOSYS;
 	} else {
 		LOG_ERR("Either RX or TX direction must be selected");
+		return -EINVAL;
+	}
+
+	if (dev_data->full_duplex) {
+		LOG_ERR("Direction-specific trigger not allowed while running in full duplex mode");
 		return -EINVAL;
 	}
 
@@ -537,6 +571,7 @@ static const struct device *get_dev_from_rx_dma_channel(uint32_t dma_channel);
 static const struct device *get_dev_from_tx_dma_channel(uint32_t dma_channel);
 static void rx_stream_disable(struct stream *stream, const struct device *dev);
 static void tx_stream_disable(struct stream *stream, const struct device *dev);
+static void both_stream_disable(const struct device *dev);
 
 /* This function is executed in the interrupt context */
 static void dma_rx_callback(const struct device *dma_dev, void *arg,
@@ -608,7 +643,14 @@ static void dma_rx_callback(const struct device *dma_dev, void *arg,
 	return;
 
 rx_disable:
-	rx_stream_disable(stream, dev);
+	if (dev_data->full_duplex) {
+		struct stream *tx = &dev_data->tx;
+
+		both_stream_disable(dev);
+		tx->state = stream->state;
+	} else {
+		rx_stream_disable(stream, dev);
+	}
 }
 
 static void dma_tx_callback(const struct device *dma_dev, void *arg,
@@ -701,7 +743,12 @@ static void dma_tx_callback(const struct device *dma_dev, void *arg,
 	return;
 
 tx_disable:
-	if ((stream->cfg.options & I2S_OPT_BIT_CLK_GATED) != 0) {
+	if (dev_data->full_duplex) {
+		struct stream *rx = &dev_data->rx;
+
+		both_stream_disable(dev);
+		rx->state = stream->state;
+	} else if ((stream->cfg.options & I2S_OPT_BIT_CLK_GATED) != 0) {
 		tx_stream_disable(stream, dev);
 	}
 }
@@ -943,6 +990,251 @@ static void tx_stream_disable(struct stream *stream, const struct device *dev)
 	}
 
 	active_dma_tx_channel[stream->dma_channel] = NULL;
+}
+
+/*
+ * Start RX and TX simultaneously on a single I2S peripheral, using the
+ * STM32H7 SPI/I2S full duplex hardware transfer mode. RX and TX share a
+ * single I2SCFGR register and are started/stopped together with a single
+ * LL_I2S_Enable()/LL_SPI_StartMasterTransfer() pair.
+ */
+static int both_stream_start(const struct device *dev)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_i2s)
+	const struct i2s_stm32_cfg *cfg = dev->config;
+	struct i2s_stm32_data *const dev_data = dev->data;
+	struct stream *rx = &dev_data->rx;
+	struct stream *tx = &dev_data->tx;
+	size_t tx_block_size = 0;
+	int ret;
+
+	ret = k_mem_slab_alloc(rx->cfg.mem_slab, &rx->mem_block, K_NO_WAIT);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = queue_get(tx->msgq, &tx->mem_block, &tx_block_size, 0);
+	if (ret < 0) {
+		LOG_ERR("queue_get() <FAILED>: ret=%d, used=%d/%d", ret,
+			k_msgq_num_used_get(tx->msgq), CONFIG_I2S_STM32_TX_BLOCK_COUNT);
+		k_mem_slab_free(rx->cfg.mem_slab, rx->mem_block);
+		rx->mem_block = NULL;
+		return ret;
+	}
+
+	/* Assure cache coherency before DMA read operation */
+	sys_cache_data_flush_range(tx->mem_block, tx_block_size);
+
+	if (rx->master) {
+		LL_I2S_SetTransferMode(cfg->i2s, LL_I2S_MODE_MASTER_FULL_DUPLEX);
+	} else {
+		LL_I2S_SetTransferMode(cfg->i2s, LL_I2S_MODE_SLAVE_FULL_DUPLEX);
+	}
+
+	/* remember active RX/TX DMA channels (used in callbacks) */
+	active_dma_rx_channel[rx->dma_channel] = dev;
+	active_dma_tx_channel[tx->dma_channel] = dev;
+
+	ret = start_dma(rx->dev_dma, rx->dma_channel, &rx->dma_cfg,
+			(void *)LL_SPI_DMA_GetRxRegAddr(cfg->i2s),
+			rx->src_addr_increment, rx->mem_block,
+			rx->dst_addr_increment, rx->fifo_threshold,
+			rx->cfg.block_size);
+	if (ret < 0) {
+		LOG_ERR("Failed to start RX DMA transfer: %d", ret);
+		goto err_tx_queued;
+	}
+
+	ret = start_dma(tx->dev_dma, tx->dma_channel, &tx->dma_cfg,
+			tx->mem_block, tx->src_addr_increment,
+			(void *)LL_SPI_DMA_GetTxRegAddr(cfg->i2s),
+			tx->dst_addr_increment, tx->fifo_threshold,
+			tx_block_size);
+	if (ret < 0) {
+		LOG_ERR("Failed to start TX DMA transfer: %d", ret);
+		goto err_rx_started;
+	}
+
+	LL_I2S_EnableDMAReq_RX(cfg->i2s);
+	LL_I2S_EnableDMAReq_TX(cfg->i2s);
+
+	LL_I2S_EnableIT_OVR(cfg->i2s);
+	LL_I2S_EnableIT_UDR(cfg->i2s);
+	LL_I2S_EnableIT_FRE(cfg->i2s);
+	LL_I2S_Enable(cfg->i2s);
+	LL_SPI_StartMasterTransfer(cfg->i2s);
+
+	dev_data->full_duplex = true;
+
+	return 0;
+
+err_rx_started:
+	dma_stop(rx->dev_dma, rx->dma_channel);
+err_tx_queued:
+	active_dma_rx_channel[rx->dma_channel] = NULL;
+	active_dma_tx_channel[tx->dma_channel] = NULL;
+	k_mem_slab_free(rx->cfg.mem_slab, rx->mem_block);
+	rx->mem_block = NULL;
+	k_mem_slab_free(tx->cfg.mem_slab, tx->mem_block);
+	tx->mem_block = NULL;
+	return ret;
+#else
+	ARG_UNUSED(dev);
+	return -ENOSYS;
+#endif
+}
+
+/*
+ * Jointly tear down RX and TX for full duplex mode. Idempotent: safe to call
+ * from both the RX and TX DMA completion callbacks when they race to finish
+ * the last coupled transfer.
+ */
+static void both_stream_disable(const struct device *dev)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_i2s)
+	const struct i2s_stm32_cfg *cfg = dev->config;
+	struct i2s_stm32_data *const dev_data = dev->data;
+	struct stream *rx = &dev_data->rx;
+	struct stream *tx = &dev_data->tx;
+	unsigned int key = irq_lock();
+
+	if (!dev_data->full_duplex) {
+		irq_unlock(key);
+		return;
+	}
+	dev_data->full_duplex = false;
+	irq_unlock(key);
+
+	LL_I2S_Disable(cfg->i2s);
+	LL_I2S_DisableDMAReq_RX(cfg->i2s);
+	LL_I2S_DisableDMAReq_TX(cfg->i2s);
+	LL_I2S_DisableIT_OVR(cfg->i2s);
+	LL_I2S_DisableIT_UDR(cfg->i2s);
+	LL_I2S_DisableIT_FRE(cfg->i2s);
+
+	dma_stop(rx->dev_dma, rx->dma_channel);
+	dma_stop(tx->dev_dma, tx->dma_channel);
+
+	if (rx->mem_block != NULL) {
+		k_mem_slab_free(rx->cfg.mem_slab, rx->mem_block);
+		rx->mem_block = NULL;
+	}
+	if (tx->mem_block != NULL) {
+		k_mem_slab_free(tx->cfg.mem_slab, tx->mem_block);
+		tx->mem_block = NULL;
+	}
+
+	active_dma_rx_channel[rx->dma_channel] = NULL;
+	active_dma_tx_channel[tx->dma_channel] = NULL;
+#else
+	ARG_UNUSED(dev);
+#endif
+}
+
+static int trigger_both(const struct device *dev, enum i2s_trigger_cmd cmd)
+{
+	struct i2s_stm32_data *const dev_data = dev->data;
+	const struct i2s_stm32_cfg *const cfg = dev->config;
+	struct stream *rx = &dev_data->rx;
+	struct stream *tx = &dev_data->tx;
+	unsigned int key;
+	int ret;
+
+	switch (cmd) {
+	case I2S_TRIGGER_START:
+		if (rx->state != I2S_STATE_READY || tx->state != I2S_STATE_READY) {
+			LOG_ERR("START trigger: invalid state");
+			return -EIO;
+		}
+
+		__ASSERT_NO_MSG(rx->mem_block == NULL);
+		__ASSERT_NO_MSG(tx->mem_block == NULL);
+
+		ret = both_stream_start(dev);
+		if (ret < 0) {
+			LOG_ERR("START trigger failed %d", ret);
+			return ret;
+		}
+
+		rx->state = I2S_STATE_RUNNING;
+		tx->state = I2S_STATE_RUNNING;
+		rx->last_block = false;
+		tx->last_block = false;
+		break;
+
+	case I2S_TRIGGER_STOP:
+		key = irq_lock();
+		if (rx->state != I2S_STATE_RUNNING || tx->state != I2S_STATE_RUNNING) {
+			irq_unlock(key);
+			LOG_ERR("STOP trigger: invalid state");
+			return -EIO;
+		}
+		if (ll_i2s_dma_busy(cfg->i2s)) {
+			rx->state = I2S_STATE_STOPPING;
+			tx->state = I2S_STATE_STOPPING;
+			tx->tx_stop_for_drain = false;
+		} else {
+			both_stream_disable(dev);
+			rx->state = I2S_STATE_READY;
+			tx->state = I2S_STATE_READY;
+			rx->last_block = true;
+			tx->last_block = true;
+		}
+		irq_unlock(key);
+		break;
+
+	case I2S_TRIGGER_DRAIN:
+		key = irq_lock();
+		if (rx->state != I2S_STATE_RUNNING || tx->state != I2S_STATE_RUNNING) {
+			irq_unlock(key);
+			LOG_ERR("DRAIN trigger: invalid state");
+			return -EIO;
+		}
+		if ((queue_is_empty(tx->msgq) == false) || ll_i2s_dma_busy(cfg->i2s)) {
+			/*
+			 * Only TX transitions to STOPPING: RX must keep running
+			 * and collecting data until TX has drained its queue,
+			 * since both directions share the same peripheral clock.
+			 */
+			tx->state = I2S_STATE_STOPPING;
+			tx->tx_stop_for_drain = true;
+		} else {
+			both_stream_disable(dev);
+			rx->state = I2S_STATE_READY;
+			tx->state = I2S_STATE_READY;
+		}
+		irq_unlock(key);
+		break;
+
+	case I2S_TRIGGER_DROP:
+		if (rx->state == I2S_STATE_NOT_READY || tx->state == I2S_STATE_NOT_READY) {
+			LOG_ERR("DROP trigger: invalid state");
+			return -EIO;
+		}
+		both_stream_disable(dev);
+		stream_queue_drop(rx);
+		stream_queue_drop(tx);
+		rx->state = I2S_STATE_READY;
+		tx->state = I2S_STATE_READY;
+		break;
+
+	case I2S_TRIGGER_PREPARE:
+		if (rx->state != I2S_STATE_ERROR || tx->state != I2S_STATE_ERROR) {
+			LOG_ERR("PREPARE trigger: invalid state");
+			return -EIO;
+		}
+		rx->state = I2S_STATE_READY;
+		tx->state = I2S_STATE_READY;
+		stream_queue_drop(rx);
+		stream_queue_drop(tx);
+		break;
+
+	default:
+		LOG_ERR("Unsupported trigger command");
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static const struct device *get_dev_from_rx_dma_channel(uint32_t dma_channel)
