@@ -270,6 +270,7 @@ st_cam_i2c: &i2c1 {
 		compatible = "wolfson,wm8904";
 		reg = <0x1a>;
 		status = "okay";
+		input-pga-select = <1>;
 	};
 };
 
