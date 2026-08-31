@@ -14,6 +14,7 @@
 #include <stm32_ll_rcc.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/drivers/clock_control.h>
@@ -89,6 +90,7 @@ struct display_stm32_ltdc_config {
 	uint32_t height;
 	struct gpio_dt_spec disp_on_gpio;
 	struct gpio_dt_spec bl_ctrl_gpio;
+	struct pwm_dt_spec bl_ctrl_pwm;
 	const struct stm32_pclken *pclken;
 	size_t pclk_len;
 	const struct reset_dt_spec reset;
@@ -382,6 +384,29 @@ static int stm32_ltdc_read(const struct device *dev, const uint16_t x,
 	return 0;
 }
 
+static inline bool stm32_ltdc_has_bl_ctrl(const struct device *dev)
+{
+	const struct display_stm32_ltdc_config *config = dev->config;
+
+	return config->bl_ctrl_pwm.dev || config->bl_ctrl_gpio.port;
+}
+
+static int stm32_ltdc_set_brightness(const struct device *dev, const uint8_t brightness)
+{
+	const struct display_stm32_ltdc_config *config = dev->config;
+
+	if (config->bl_ctrl_pwm.dev) {
+		uint32_t pulse = brightness * config->bl_ctrl_pwm.period / 255;
+		return pwm_set_dt(&config->bl_ctrl_pwm, config->bl_ctrl_pwm.period, pulse);
+	}
+
+	if (config->bl_ctrl_gpio.port) {
+		return gpio_pin_set_dt(&config->bl_ctrl_gpio, brightness > 0);
+	}
+
+	return -ENODEV;
+}
+
 static void *stm32_ltdc_get_framebuffer(const struct device *dev)
 {
 	struct display_stm32_ltdc_data *data = dev->data;
@@ -395,13 +420,13 @@ static int stm32_ltdc_display_blanking_off(const struct device *dev)
 	const struct device *display_dev = config->display_controller;
 	int err;
 
-	if (!display_dev && !config->bl_ctrl_gpio.port) {
+	if (!display_dev && !stm32_ltdc_has_bl_ctrl(dev)) {
 		return -ENOSYS;
 	}
 
 	/* Turn on backlight (if its GPIO is defined in device tree) */
-	if (config->bl_ctrl_gpio.port) {
-		err = gpio_pin_set_dt(&config->bl_ctrl_gpio, 1);
+	if (stm32_ltdc_has_bl_ctrl(dev)) {
+		err = stm32_ltdc_set_brightness(dev, 255);
 		if (err < 0) {
 			return err;
 		}
@@ -426,13 +451,13 @@ static int stm32_ltdc_display_blanking_on(const struct device *dev)
 	const struct device *display_dev = config->display_controller;
 	int err;
 
-	if (!display_dev && !config->bl_ctrl_gpio.port) {
+	if (!display_dev && !stm32_ltdc_has_bl_ctrl(dev)) {
 		return -ENOSYS;
 	}
 
 	/* Turn off backlight (if its GPIO is defined in device tree) */
-	if (config->bl_ctrl_gpio.port) {
-		err = gpio_pin_set_dt(&config->bl_ctrl_gpio, 0);
+	if (stm32_ltdc_has_bl_ctrl(dev)) {
+		err = stm32_ltdc_set_brightness(dev, 0);
 		if (err < 0) {
 			return err;
 		}
@@ -663,8 +688,8 @@ static int stm32_ltdc_suspend(const struct device *dev)
 	}
 
 	/* Turn off backlight (if its GPIO is defined in device tree) */
-	if (config->bl_ctrl_gpio.port) {
-		err = gpio_pin_set_dt(&config->bl_ctrl_gpio, 0);
+	if (stm32_ltdc_has_bl_ctrl(dev)) {
+		err = stm32_ltdc_set_brightness(dev, 0);
 		if (err < 0) {
 			return err;
 		}
@@ -707,6 +732,7 @@ static int stm32_ltdc_pm_action(const struct device *dev,
 static DEVICE_API(display, stm32_ltdc_display_api) = {
 	.write = stm32_ltdc_write,
 	.read = stm32_ltdc_read,
+	.set_brightness = stm32_ltdc_set_brightness,
 	.get_framebuffer = stm32_ltdc_get_framebuffer,
 	.get_capabilities = stm32_ltdc_get_capabilities,
 	.set_pixel_format = stm32_ltdc_set_pixel_format,
@@ -861,6 +887,7 @@ static DEVICE_API(display, stm32_ltdc_display_api) = {
 				(GPIO_DT_SPEC_INST_GET(inst, disp_on_gpios)), ({ 0 })),		\
 		.bl_ctrl_gpio = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, bl_ctrl_gpios),		\
 				(GPIO_DT_SPEC_INST_GET(inst, bl_ctrl_gpios)), ({ 0 })),		\
+		.bl_ctrl_pwm = PWM_DT_SPEC_INST_GET_BY_NAME_OR(inst, bl, { 0 }),		\
 		.reset = RESET_DT_SPEC_INST_GET(0),						\
 		.pclken = pclken_##inst,					\
 		.pclk_len = DT_INST_NUM_CLOCKS(inst),				\

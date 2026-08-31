@@ -208,6 +208,14 @@
 	};
 };
 
+&lptim1 {
+	pwmlp1: pwm {
+		status = "okay";
+		pinctrl-0 = <&lptim1_ch2_pg15>;
+		pinctrl-names = "default";
+	};
+};
+
 &rng {
 	status = "okay";
 };
@@ -433,7 +441,8 @@ zephyr_udc0: &usb1 {};
 		     &ltdc_de_pb14 &ltdc_clk_pg13 &ltdc_hsync_pg2 &ltdc_vsync_pe11>;
 	pinctrl-names = "default";
 	disp-on-gpios = <&gpioe 15 GPIO_ACTIVE_HIGH>;
-	bl-ctrl-gpios = <&gpiog 15 GPIO_ACTIVE_HIGH>;
+	pwms = <&pwmlp1 2 0xFFFF PWM_POLARITY_INVERTED>;
+	pwm-names = "bl";
 	ext-sdram = <&psram>;
 
 	status = "okay";

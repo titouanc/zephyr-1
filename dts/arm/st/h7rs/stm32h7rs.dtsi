@@ -952,6 +952,12 @@
 			interrupts = <119 0>;
 			interrupt-names = "wakeup";
 			status = "disabled";
+
+			pwm {
+				compatible = "st,stm32-lptim-pwm";
+				status = "disabled";
+				#pwm-cells = <3>;
+			};
 		};
 
 		adc1: adc@40022000 {
