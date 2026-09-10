@@ -92,7 +92,7 @@ ZTEST_USER(poll_api_1cpu, test_poll_no_wait)
 
 	k_msgq_alloc_init(mq, MSGQ_MSG_SIZE, MSGQ_MAX_MSGS);
 
-	k_pipe_write(&no_wait_pipe, PIPE_DATA, sizeof(PIPE_DATA), K_NO_WAIT);
+	k_pipe_write(&no_wait_pipe, (const uint8_t *)PIPE_DATA, sizeof(PIPE_DATA), K_NO_WAIT);
 
 	struct k_poll_event events[] = {
 		K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
@@ -183,7 +183,8 @@ ZTEST_USER(poll_api_1cpu, test_poll_no_wait)
 	zassert_false(memcmp(msgq_msg, msgq_recv_buf, MSGQ_MSG_SIZE));
 
 	zassert_equal(events[5].state, K_POLL_STATE_PIPE_DATA_AVAILABLE);
-	result = k_pipe_read(&no_wait_pipe, pipe_recv_buf, sizeof(pipe_recv_buf), K_NO_WAIT);
+	result = k_pipe_read(&no_wait_pipe, (uint8_t *)pipe_recv_buf,
+			     sizeof(pipe_recv_buf), K_NO_WAIT);
 	zassert_equal(result, sizeof(PIPE_DATA));
 	zassert_str_equal(pipe_recv_buf, PIPE_DATA);
 
@@ -293,7 +294,7 @@ static void poll_wait_helper(void *use_queuelike, void *msgq, void *p3)
 	}
 
 	if (flags & USE_PIPE) {
-		k_pipe_write(&wait_pipe, PIPE_DATA, sizeof(PIPE_DATA), K_NO_WAIT);
+		k_pipe_write(&wait_pipe, (const uint8_t *)PIPE_DATA, sizeof(PIPE_DATA), K_NO_WAIT);
 	}
 
 	if (flags & USE_LIFO) {
@@ -395,7 +396,7 @@ void check_results(struct k_poll_event *events, uint32_t event_type, bool is_ava
 	case CHECK_PIPE:
 		if (is_available) {
 			zassert_equal(events->state, K_POLL_STATE_PIPE_DATA_AVAILABLE);
-			result = k_pipe_read(&wait_pipe, pipe_recv_buf,
+			result = k_pipe_read(&wait_pipe, (uint8_t *)pipe_recv_buf,
 					     sizeof(pipe_recv_buf), K_NO_WAIT);
 			zassert_equal(result, sizeof(PIPE_DATA));
 			zassert_str_equal(pipe_recv_buf, PIPE_DATA);
@@ -816,6 +817,191 @@ ZTEST(poll_api, test_poll_multi)
 
 	k_thread_abort(tid1);
 	k_thread_abort(tid2);
+}
+
+struct sem_reset_poll_waiter {
+	struct k_poll_event event;
+	struct k_sem done;
+	k_timeout_t timeout;
+	int rc;
+};
+
+static struct k_sem sem_reset_poll;
+static struct k_sem sem_reset_poll_done;
+static struct k_sem sem_reset_poll_allow_give;
+static struct k_thread sem_reset_poll_thread;
+static K_THREAD_STACK_DEFINE(sem_reset_poll_stack, STACK_SIZE);
+static struct sem_reset_poll_waiter sem_reset_poll_waiters[2];
+static struct k_thread sem_reset_poll_threads[2];
+static K_THREAD_STACK_ARRAY_DEFINE(sem_reset_poll_stacks, 2, STACK_SIZE);
+
+/* Wait for the semaphore poll event and record the result. */
+static void sem_reset_poll_waiter_thread(void *p1, void *p2, void *p3)
+{
+	struct sem_reset_poll_waiter *waiter = p1;
+
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	k_poll_event_init(&waiter->event, K_POLL_TYPE_SEM_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
+			  &sem_reset_poll);
+	waiter->rc = k_poll(&waiter->event, 1, waiter->timeout);
+	k_sem_give(&waiter->done);
+}
+
+/* Delay reset long enough for the test thread to register its poll waiter. */
+static void sem_reset_poll_reset_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	k_sleep(K_MSEC(20));
+	k_sem_reset(&sem_reset_poll);
+	k_sem_give(&sem_reset_poll_done);
+}
+
+/* Reset the semaphore, then wait for permission to wake the poller with give. */
+static void sem_reset_poll_reset_then_give_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	k_sleep(K_MSEC(20));
+	k_sem_reset(&sem_reset_poll);
+	k_sem_give(&sem_reset_poll_done);
+	k_sem_take(&sem_reset_poll_allow_give, K_FOREVER);
+	k_sem_give(&sem_reset_poll);
+}
+
+/**
+ * @brief Verify that reset does not wake a single semaphore poll waiter
+ *
+ * @details Resetting an unavailable semaphore must not report the semaphore
+ * as available to a thread waiting in k_poll().
+ *
+ * @ingroup kernel_poll_tests
+ */
+ZTEST(poll_api, test_poll_sem_reset_single_waiter)
+{
+	/* Verify that the poll waiter remains pending until its timeout. */
+	int rc;
+	k_tid_t tid;
+	struct k_poll_event event;
+
+	k_sem_init(&sem_reset_poll, 0, 1);
+	k_sem_init(&sem_reset_poll_done, 0, 1);
+	k_poll_event_init(&event, K_POLL_TYPE_SEM_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
+			  &sem_reset_poll);
+
+	tid = k_thread_create(&sem_reset_poll_thread, sem_reset_poll_stack,
+			      K_THREAD_STACK_SIZEOF(sem_reset_poll_stack),
+			      sem_reset_poll_reset_thread, NULL, NULL, NULL, K_PRIO_PREEMPT(1), 0,
+			      K_NO_WAIT);
+
+	rc = k_poll(&event, 1, K_MSEC(100));
+
+	zassert_equal(k_sem_take(&sem_reset_poll_done, K_SECONDS(1)), 0);
+	zassert_equal(rc, -EAGAIN);
+	zassert_equal(event.state, K_POLL_STATE_NOT_READY);
+	zassert_equal(k_sem_count_get(&sem_reset_poll), 0);
+
+	k_thread_abort(tid);
+}
+
+/**
+ * @brief Verify that reset does not wake multiple semaphore poll waiters
+ *
+ * @details
+ * Resetting an unavailable semaphore must leave all poll waiters pending until
+ * their poll timeouts expire.
+ *
+ * @ingroup kernel_poll_tests
+ */
+ZTEST(poll_api, test_poll_sem_reset_multiple_waiters)
+{
+	/* Verify that all poll waiters remain pending until their timeouts. */
+	int rc;
+
+	k_sem_init(&sem_reset_poll, 0, 1);
+
+	for (size_t i = 0; i < ARRAY_SIZE(sem_reset_poll_waiters); i++) {
+		struct sem_reset_poll_waiter *waiter = &sem_reset_poll_waiters[i];
+
+		k_sem_init(&waiter->done, 0, 1);
+		waiter->timeout = K_MSEC(100);
+		waiter->rc = -EINVAL;
+		k_thread_create(&sem_reset_poll_threads[i], sem_reset_poll_stacks[i],
+				K_THREAD_STACK_SIZEOF(sem_reset_poll_stacks[i]),
+				sem_reset_poll_waiter_thread, waiter, NULL, NULL, K_PRIO_PREEMPT(1),
+				0, K_NO_WAIT);
+	}
+
+	k_sleep(K_MSEC(20));
+	k_sem_reset(&sem_reset_poll);
+
+	for (size_t i = 0; i < ARRAY_SIZE(sem_reset_poll_waiters); i++) {
+		struct sem_reset_poll_waiter *waiter = &sem_reset_poll_waiters[i];
+
+		rc = k_sem_take(&waiter->done, K_SECONDS(1));
+		zassert_equal(rc, 0);
+		zassert_equal(waiter->rc, -EAGAIN);
+		zassert_equal(waiter->event.state, K_POLL_STATE_NOT_READY);
+		k_thread_abort(&sem_reset_poll_threads[i]);
+	}
+
+	zassert_equal(k_sem_count_get(&sem_reset_poll), 0);
+}
+
+/**
+ * @brief Verify that a semaphore poller wakes after reset and a subsequent give
+ *
+ * @details
+ * Reset must not wake a pending poller, but a subsequent give that makes the
+ * semaphore available must wake it normally.
+ *
+ * @ingroup kernel_poll_tests
+ *
+ * @see k_sem_reset(), k_sem_give(), k_poll()
+ */
+ZTEST(poll_api, test_poll_sem_reset_then_give)
+{
+	/* Verify that reset does not end the poll before the subsequent give. */
+	struct sem_reset_poll_waiter *waiter = &sem_reset_poll_waiters[0];
+	k_tid_t waiter_tid;
+	k_tid_t reset_tid;
+
+	k_sem_init(&sem_reset_poll, 0, 1);
+	k_sem_init(&sem_reset_poll_done, 0, 1);
+	k_sem_init(&sem_reset_poll_allow_give, 0, 1);
+	k_sem_init(&waiter->done, 0, 1);
+	waiter->timeout = K_FOREVER;
+	waiter->rc = -EINVAL;
+
+	waiter_tid = k_thread_create(&sem_reset_poll_threads[0], sem_reset_poll_stacks[0],
+				     K_THREAD_STACK_SIZEOF(sem_reset_poll_stacks[0]),
+				     sem_reset_poll_waiter_thread, waiter, NULL, NULL,
+				     K_PRIO_PREEMPT(1), 0, K_NO_WAIT);
+
+	k_sleep(K_MSEC(20));
+	reset_tid = k_thread_create(&sem_reset_poll_thread, sem_reset_poll_stack,
+				    K_THREAD_STACK_SIZEOF(sem_reset_poll_stack),
+				    sem_reset_poll_reset_then_give_thread, NULL, NULL, NULL,
+				    K_PRIO_PREEMPT(1), 0, K_NO_WAIT);
+
+	zassert_equal(k_sem_take(&sem_reset_poll_done, K_SECONDS(1)), 0);
+	zassert_equal(k_sem_take(&waiter->done, K_NO_WAIT), -EBUSY);
+
+	k_sem_give(&sem_reset_poll_allow_give);
+
+	zassert_equal(k_sem_take(&waiter->done, K_SECONDS(1)), 0);
+	zassert_equal(waiter->rc, 0);
+	zassert_equal(waiter->event.state, K_POLL_STATE_SEM_AVAILABLE);
+	zassert_equal(k_sem_count_get(&sem_reset_poll), 1);
+
+	k_thread_abort(reset_tid);
+	k_thread_abort(waiter_tid);
 }
 
 static struct k_poll_signal signal;

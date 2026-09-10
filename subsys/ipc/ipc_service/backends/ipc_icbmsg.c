@@ -68,6 +68,9 @@
 #define MAYBE_CONST const
 #endif
 
+#define NAME_HASH_EMPTY 0U
+#define NAME_HASH_NONAME 1U
+
 LOG_MODULE_REGISTER(ipc_icbmsg, CONFIG_IPC_SERVICE_BACKEND_ICBMSG_LOG_LEVEL);
 
 /** Size of the header (size field) of the block. */
@@ -479,7 +482,7 @@ static int heap_alloc_tx_buffer(const struct device *instance, struct ept_data *
 	}
 
 	while (true) {
-		int off;
+		int off = 0;
 
 		K_SPINLOCK(&data->lock) {
 			off = bitmask_find_gap(data->tx_usage_mask, num_blocks,
@@ -618,9 +621,10 @@ static int msg_q_produce(const struct device *instance, uint8_t block_index, int
 	uint32_t active_count;
 	uint32_t idx;
 	int rv = 0;
+	uint8_t slot_entry = block_index;
 
 	if (priority != 0) {
-		block_index |= HI_PRIO_MASK;
+		slot_entry |= HI_PRIO_MASK;
 	}
 
 	K_SPINLOCK(&data->lock) {
@@ -637,7 +641,7 @@ static int msg_q_produce(const struct device *instance, uint8_t block_index, int
 			   heap_packet_from_index(&config->tx, block_index)->header.size);
 		STATS_SET(data->stats, tx_max_active_count,
 			  MAX(data->stats.tx_max_active_count, data->msg_q.tx_active_count));
-		config->tx_msg_q.prod_shmq->slots[idx] = block_index;
+		config->tx_msg_q.prod_shmq->slots[idx] = slot_entry;
 		LOG_DBG("addr:%p Produce index: %d, block_index: %d, active_count: %d",
 			(void *)&config->tx_msg_q.prod_shmq->slots[idx], idx, block_index,
 			active_count);
@@ -849,7 +853,7 @@ static int handle_ep_unbound_request(const struct device *instance,
 
 	data->ept[ept_addr].state = EPT_UNBOUND;
 	data->ept[ept_addr].cfg = NULL;
-	data->ept[ept_addr].name_hash = 0;
+	data->ept[ept_addr].name_hash = NAME_HASH_EMPTY;
 	data->ep_cnt--;
 
 	if (unbound_callback != NULL) {
@@ -1085,7 +1089,9 @@ static int register_ept(const struct device *instance, void **token, const struc
 	bool bound = false;
 	int rv = 0;
 
-	name_hash = cfg->name == NULL ? 0 : sys_hash32_djb2(cfg->name, strlen(cfg->name));
+	/* If there is no name then use something else than 0. */
+	name_hash = cfg->name == NULL ?
+		NAME_HASH_NONAME : sys_hash32_djb2(cfg->name, strlen(cfg->name));
 
 	key = k_spin_lock(&data->lock);
 
@@ -1164,7 +1170,7 @@ static int deregister_ept(const struct device *instance, void *token)
 		for (i = 0; i < NUM_EPT; i++) {
 			if (&data->ept[i] == ept) {
 				data->ept[i].cfg = NULL;
-				data->ept[i].name_hash = 0;
+				data->ept[i].name_hash = NAME_HASH_EMPTY;
 				data->ept[i].state = EPT_UNBOUND;
 				data->ep_cnt--;
 				break;
@@ -1327,7 +1333,7 @@ static int backend_init(const struct device *instance)
 	native_emb_addr_remap((void **)&conf->rx_msg_q.cons_shmq);
 #endif
 
-#if defined(CONFIG_STATS_NAMES) || defined(CONFIG_MULTITHREADING)
+#if defined(CONFIG_STATS) || defined(CONFIG_MULTITHREADING)
 	struct icbmsg_data *data = instance->data;
 #endif
 
@@ -1465,8 +1471,8 @@ const static struct ipc_service_backend backend_ops = {
 			},                                                                         \
 		.bound_packet =                                                                    \
 			BOUND_PACKET_INIT(DT_INST_PROP(i, tx_blocks), DT_INST_PROP(i, rx_blocks)), \
-		IF_ENABLED(CONFIG_STATS_NAMES,                                              \
-			   (.stats_name = STRINGIFY(ipc_icbmsg_##i),)) };         \
+		IF_ENABLED(CONFIG_STATS,                                                           \
+			   (.stats_name = STRINGIFY(ipc_icbmsg_##i),)) };                          \
 	BUILD_ASSERT(IS_ALIGNED(GET_MEM_ADDR_INST(i, tx), GET_CACHE_ALIGNMENT(i)),                 \
 		     "TX producer queue is not aligned to cache alignment");                       \
 	BUILD_ASSERT(IS_ALIGNED(GET_MEM_ADDR_INST(i, rx), GET_CACHE_ALIGNMENT(i)),                 \
@@ -1554,14 +1560,12 @@ static void icbmsg_print_instance_stats(const struct shell *sh, const struct dev
 		    data->stats.rx_data_count);
 }
 
-#define ICBMSG_DEVICE(i) DEVICE_DT_INST_GET(i),
-
 static int cmd_icbmsg_stats(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 	static const struct device *const icbmsg_devices[] = {
-		DT_INST_FOREACH_STATUS_OKAY(ICBMSG_DEVICE)};
+		DT_INST_FOREACH_STATUS_OKAY(DEVICE_DT_INST_GET_COMMA)};
 
 	for (size_t i = 0; i < ARRAY_SIZE(icbmsg_devices); i++) {
 		if (!device_is_ready(icbmsg_devices[i])) {

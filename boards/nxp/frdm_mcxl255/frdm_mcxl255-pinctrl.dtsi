@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <nxp/mcx/MCXL255VDF-pinctrl.h>
+#include <nxp/mcx/mcxl/pinctrl/MCXL255VDF-pinctrl.h>
 
 &pinctrl {
 	pinmux_lpuart0: pinmux_lpuart0 {
@@ -57,6 +57,42 @@
 			drive-strength = "low";
 			slew-rate = "fast";
 			input-enable;
+		};
+	};
+
+	pinmux_lpi2c0: pinmux_lpi2c0 {
+		group0 {
+			pinmux = <LPI2C0_SCL_P3_12>,
+				 <LPI2C0_SDA_P3_13>;
+			slew-rate = "fast";
+			drive-strength = "low";
+			input-enable;
+			bias-pull-up;
+			drive-open-drain;
+		};
+	};
+
+	pinmux_lpi2c1: pinmux_lpi2c1 {
+		group0 {
+			pinmux = <LPI2C1_SCL_P3_0>,
+				 <LPI2C1_SDA_P3_1>;
+			slew-rate = "fast";
+			drive-strength = "low";
+			input-enable;
+			bias-pull-up;
+			drive-open-drain;
+		};
+	};
+
+	pinmux_aon_lpi2c0: pinmux_aon_lpi2c0 {
+		group0 {
+			pinmux = <AON_LPI2C0_SCL_P0_12>,
+				 <AON_LPI2C0_SDA_P0_13>;
+			slew-rate = "fast";
+			drive-strength = "low";
+			input-enable;
+			bias-pull-up;
+			drive-open-drain;
 		};
 	};
 };
