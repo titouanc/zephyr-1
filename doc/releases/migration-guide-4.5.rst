@@ -293,6 +293,64 @@ Boards
   ``SOC_STM32MP15_M4`` must select :kconfig:option:`CONFIG_SOC_STM32MP157CXX_M4` instead.
   (:github:`118151`)
 
+* On the Arduino UNO R4 WiFi, ``zephyr,console`` and ``zephyr,shell-uart`` now
+  default to SCI9, which the on-board ESP32-S3 bridges to the USB-C connector as
+  a USB CDC ACM port, instead of SCI2 on the D0/D1 header pins. Console output is
+  now visible on the same port used to flash the board, with no external
+  USB-serial adapter. Applications that relied on the console being on D0/D1 can
+  select it again in an application overlay:
+
+  .. code-block:: devicetree
+
+     / {
+         chosen {
+             zephyr,console = &uart2;
+             zephyr,shell-uart = &uart2;
+         };
+     };
+
+  The Arduino UNO R4 Minima is unaffected. (:github:`118433`)
+
+* The Espressif per-module devicetree include files and their SoC Kconfig symbols have been
+  removed. A module or SIP part number describes how much flash and PSRAM a board carries, which
+  is a property of the board rather than of the SoC, so both are now declared by the board itself.
+
+  Every ``espressif/<soc>/<soc>_<module>.dtsi`` file is replaced by a single
+  ``espressif/<soc>/<soc>.dtsi`` per SoC. The matching hidden Kconfig symbols, such as
+  ``SOC_ESP32S3_WROOM_N8`` and ``SOC_ESP32_WROVER_E_N16R8``, are replaced by the plain SoC symbol,
+  such as :kconfig:option:`CONFIG_SOC_ESP32S3`. ``SOC_PART_NUMBER`` now reports the SoC rather than
+  the module.
+
+  Out-of-tree Espressif boards must be updated, and fail to build until they are:
+
+  * Include the plain SoC dtsi instead of the module one.
+  * Select the plain SoC symbol in ``Kconfig.<board>``.
+  * Describe the flash in the board dts, giving both ``reg`` and a matching ``ranges``, because
+    the SoC dtsi no longer sets either.
+
+    .. code-block:: devicetree
+
+       &flash0 {
+           reg = <0x0 DT_SIZE_M(8)>;
+           ranges = <0x0 0x0 DT_SIZE_M(8)>;
+       };
+
+  * Describe the PSRAM the same way, on boards that have it:
+
+    .. code-block:: devicetree
+
+       &psram0 {
+           size = <DT_SIZE_M(2)>;
+       };
+
+  On the dual-core ESP32, ``espressif/esp32/esp32_appcpu.dtsi`` no longer sets a flash either, so
+  an APPCPU board dts has to declare the same flash as its PROCPU counterpart.
+
+* On NXP S32K148, the ENET nodes ``enet`` (:dtcompatible:`nxp,enet`), ``enet_mac``
+  (:dtcompatible:`nxp,enet-mac`), ``enet_mdio`` (:dtcompatible:`nxp,enet-mdio`) and
+  ``enet_ptp_clock`` (:dtcompatible:`nxp,enet-ptp-clock`) are now ``disabled`` by default instead
+  of ``okay``. Out-of-tree boards that use Ethernet must set ``status = "okay"`` on these nodes.
+
 Device Drivers and Devicetree
 *****************************
 
@@ -327,6 +385,18 @@ ADC
   :kconfig:option:`CONFIG_ADC_MCUX_LPADC` is enabled, and its ``default y`` is now scoped to that
   condition. In-tree boards no longer enable it explicitly in their defconfigs since
   the default already covers them.
+
+* The ``CONFIG_LPADC_CHANNEL_COUNT`` Kconfig option has been removed. The NXP LPADC driver now
+  treats hardware command slots as logical ADC channels and derives the number of logical channels
+  per instance from the ``channel`` child nodes declared for that instance in devicetree, so unused
+  command slots no longer consume RAM. Applications that lowered the Kconfig option to save RAM
+  should simply drop it. An instance that declares no ``channel`` node keeps the full hardware
+  capacity available, so applications that only ever configure channels at runtime through
+  :c:func:`adc_channel_setup` are unaffected; applications that mix both must declare in
+  devicetree the highest channel identifier they set up at runtime. Declaring a channel identifier
+  beyond the number of ``CMD`` registers implemented by the SoC is now a build error instead of a
+  runtime HAL assertion, and :c:func:`adc_read` now rejects an empty channel mask, or one selecting
+  channels beyond that limit, with ``-EINVAL`` instead of silently ignoring it (:github:`116995`).
 
 Analog Devices
 ==============
@@ -516,6 +586,14 @@ Controller Area Network (CAN)
 * The deprecated ``bus-speed`` and ``bus-speed-data`` CAN controller devicetree properties have
   been removed. Use ``bitrate`` and ``bitrate-data`` instead.
 
+* The CAN controllers driver ops no longer contain a ``can_set_state_change_callback_t`` function
+  pointer as adding/removing callbacks is now handled via the generic
+  :c:func:`can_add_state_change_callback`, and :c:func:`can_remove_state_change_callback` API
+  functions. Out-of-tree drivers can either remove the driver op completely or replace it with
+  ``can_state_change_callbacks_enabled_t`` as needed. Drivers must now use
+  :c:func:`can_fire_state_change_callbacks` for firing CAN controller state change callbacks
+  (:github:`117889`).
+
 Counter
 =======
 
@@ -529,6 +607,11 @@ Counter
 * The ``prescaler`` property of :dtcompatible:`nxp,lptmr` has been removed. Use
   ``prescale-glitch-filter`` and ``prescale-glitch-filter-bypass`` instead. The new property is
   an exponent, not a divisor: the prescaler divides by ``2^(prescale-glitch-filter + 1)``.
+
+* :dtcompatible:`adi,max32-rtc-counter` and :dtcompatible:`adi,max32-wut` now use the shared
+  ``clk_32k`` node for 32 kHz clock source selection. The clock source is now configured through the
+  ``clocks`` property of the ``clk_32k`` node, instead of ``clock-source`` property in each
+  peripheral node (:github:`117709`).
 
 Devicetree
 ==========
@@ -842,6 +925,14 @@ I2C
   :dtcompatible:`ite,it51xxx-i2c` :dtcompatible:`ite,it8xxx2-i2c` transfer
   timeout is now using the generic ``zephyr,transfer-timeout-ms`` property
   instead of ``transfer-timeout-ms``, default to 500ms.
+
+* The :dtcompatible:`nxp,sc18im704-i2c` bridge no longer sends the target address
+  unshifted to the SC18IM704. The Zephyr I2C API passes a 7-bit address to a controller's
+  ``transfer()`` callback, and the driver now shifts it left by one to build the address byte
+  the bridge expects. Devicetree nodes sitting on a :dtcompatible:`nxp,sc18im704-i2c` bus
+  that compensated for the missing shift by declaring a pre-shifted ``reg`` (for example
+  ``reg = <0xa0>`` for a device at address ``0x50``) must now declare the real 7-bit address
+  (``reg = <0x50>``).
 
 I2S
 ===
@@ -1639,6 +1730,10 @@ USB
   and should be removed from DTS files; the underlying driver will compute the correct value
   automatically if the property doesn't exist (and honor it otherwise). (:github:`117882`)
 
+* The ``get_desc`` callback in :c:struct:`usbd_class_api` now returns ``const void *`` instead of
+  ``void *``, so that a class can keep its array of descriptor pointers in ROM. Out-of-tree
+  classes must update the return type of their handler. (:github:`118251`)
+
 Video
 =====
 
@@ -1904,6 +1999,17 @@ Bluetooth Host
   :kconfig:option:`CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE`, but both stack sizes are
   application-specific and should be validated using stack-usage measurements.
 
+* When :kconfig:option:`CONFIG_BT_GATT_AUTO_READ_CENTRAL_ADDR_RES` is enabled (the
+  default when possible), the host reads the Central Address Resolution characteristic
+  of a bonded peer once when the bond is created, and :c:func:`bt_le_adv_start`,
+  :c:func:`bt_le_ext_adv_create` and :c:func:`bt_le_ext_adv_update_param` now fail
+  with ``-ENOTSUP`` when :c:enumerator:`BT_LE_ADV_OPT_DIR_ADDR_RPA` is used towards a
+  peer known not to support address resolution. Such a peer cannot resolve the target
+  address, so it would never respond to the advertising. Applications that need to know
+  in advance can read the same answer with :c:func:`bt_le_bond_addr_res_support`, and
+  reach those peers with directed advertising towards their identity address instead.
+  Disabling the option restores the previous behavior.
+
 * Selected Bluetooth Host work items now run on the dedicated Bluetooth RX
   workqueue instead of the system workqueue. Application callbacks reached from
   those work items consequently run in the Bluetooth RX thread. This includes
@@ -1923,6 +2029,14 @@ Bluetooth Host
   deprecated since Zephyr 4.2, and the number of pending TX buffers with a callback always
   follows :kconfig:option:`CONFIG_BT_BUF_ACL_TX_COUNT`.
 
+* :c:member:`bt_le_ext_adv_info.sid` is now being set to ``BT_GAP_SID_INVALID`` for legacy
+  advertising sets, as SIDs are only valid for extended advertising sets. Applications should not
+  expect the :c:member:`bt_le_adv_param.sid` to be applied for legacy advertising sets.
+
+* :c:member:`bt_le_ext_adv_info.sid` now reflects the SID given to
+  :c:func:`bt_le_ext_adv_update_param`. Previously it kept the value from
+  :c:func:`bt_le_ext_adv_create` even though the controller applied the new one.
+
 Bluetooth Mesh
 ==============
 
@@ -1940,6 +2054,11 @@ Bluetooth Services
 
 Networking
 **********
+
+* The HTTP client response callback (:c:type:`http_response_cb_t`) may now be
+  invoked more than once for a single received buffer, once per body fragment,
+  for example once per chunk of a chunked response. Applications that assumed a
+  single callback per receive must append every fragment they are handed.
 
 * The ``struct dns_server`` type nested in :c:struct:`dns_resolve_context` has been
   renamed to ``struct dns_server_info``. A C++ class member cannot share the name of
@@ -2143,6 +2262,101 @@ LoRaWAN
   These ordering requirements do not apply to the LoRaMac-node backend
   (:kconfig:option:`CONFIG_LORA_MODULE_BACKEND_LORAMAC_NODE`).
 
+Libraries
+*********
+
+Ring Buffer
+===========
+
+The ring buffer API has been reworked to reduce the :c:struct:`ring_buf` size and to make the
+bookkeeping path more efficient. To accommodate these changes, the zero-copy claim/finish API
+(``ring_buf_put_claim()`` / ``ring_buf_put_finish()`` and their ``get`` counterparts) has been
+replaced by the non-stacking :c:func:`ring_buf_put_ptr` and :c:func:`ring_buf_get_ptr`.
+
+The legacy claim/finish API is still available, but only when
+:kconfig:option:`CONFIG_RING_BUFFER` is enabled. New code should use the ``_ptr`` API
+directly.
+
+Enabling :kconfig:option:`CONFIG_RING_BUFFER` selects the legacy ring buffer header, which
+also brings back the other deprecated symbols that are absent from the default header: the entire
+item API (:c:func:`ring_buf_item_init`, :c:func:`ring_buf_item_put`, :c:func:`ring_buf_item_get`,
+:c:func:`ring_buf_item_space_get`, ``RING_BUF_ITEM_DECLARE*`` and ``RING_BUF_ITEM_SIZEOF``) and
+``ring_buf_internal_reset()``. Out-of-tree code that still uses any of these fails to compile with
+no other hint; enabling this option is the switch that restores them while the code is migrated to
+:c:struct:`sys_ringq` and the ``_ptr`` API.
+
+:c:func:`ring_buf_get` no longer accepts a ``NULL`` destination to discard data in the default
+(slim) build; passing ``NULL`` is only tolerated when :kconfig:option:`CONFIG_RING_BUFFER` is
+enabled. To drop data without a destination buffer, advance the read index directly with
+:c:func:`ring_buf_consume`, for example
+``ring_buf_consume(rb, MIN(count, ring_buf_size_get(rb)))``.
+
+Advanced use cases such as **speculative-write-then-cancel** and **backfilling** (modifying a
+previously written header before committing) now rely on the trailing ``offset`` parameter of
+:c:func:`ring_buf_put_ptr` and :c:func:`ring_buf_get_ptr`. The offset is the number of bytes past
+the current write (or read) index that the caller has already tentatively reserved, wrapping
+handled internally. You lay out successive regions by passing an increasing offset, leaving the
+real ring buffer unmodified, and only advance it with :c:func:`ring_buf_commit` (or
+:c:func:`ring_buf_consume`).
+If any step fails you simply return without committing, which is the equivalent of the old
+``ring_buf_put_finish(rb, 0)`` cancellation.
+
+For example, the following claim/finish code:
+
+.. code-block:: c
+
+   int write_pkg(struct ring_buf *rb, const uint8_t *payload, size_t payload_size)
+   {
+           struct hdr *h;
+           uint8_t *ptr;
+           uint32_t claim_size;
+
+           claim_size = ring_buf_put_claim(rb, (uint8_t **)&h, sizeof(*h));
+           if (claim_size < sizeof(*h)) {
+                   ring_buf_put_finish(rb, 0);
+                   return -ENOMEM;
+           }
+
+           claim_size = ring_buf_put_claim(rb, &ptr, payload_size);
+           if (claim_size == 0) {
+                   ring_buf_put_finish(rb, 0);
+                   return -ENOMEM;
+           }
+           h->len = claim_size;
+           /* ... write payload through ptr ... */
+           ring_buf_put_finish(rb, sizeof(*h) + h->len);
+           return h->len;
+   }
+
+would roughly translate to:
+
+.. code-block:: c
+
+   int write_pkg(struct ring_buf *rb, const uint8_t *payload, size_t payload_size)
+   {
+           struct hdr *h;
+           uint8_t *ptr;
+           uint32_t claim_size;
+
+           /* Reserve the header region without committing it. */
+           if (ring_buf_put_ptr(rb, (uint8_t **)&h, 0) < sizeof(*h)) {
+                   return -ENOMEM;
+           }
+
+           /* Expose the region right after the header via a trailing offset. */
+           claim_size = ring_buf_put_ptr(rb, &ptr, sizeof(*h));
+           if (claim_size == 0) {
+                   /* Nothing was committed to rb, so the write is cancelled. */
+                   return -ENOMEM;
+           }
+           h->len = MIN(claim_size, payload_size);
+           /* ... write payload through ptr ... */
+
+           /* Publish header and payload atomically to the real buffer. */
+           ring_buf_commit(rb, sizeof(*h) + h->len);
+           return h->len;
+   }
+
 Other subsystems
 ****************
 
@@ -2241,6 +2455,17 @@ MCUmgr
   :ref:`mcumgr_os_application_info` command now always reports the board target as hardware
   platform; the pre-4.3 board and board revision output is no longer available.
 
+* The image management client (:kconfig:option:`CONFIG_MCUMGR_GRP_IMG_CLIENT`)
+  now supports SHA-512 image digests in addition to SHA-256:
+
+  * :c:func:`img_mgmt_client_state_write` takes a new ``hash_len`` argument.
+    When ``hash`` is not ``NULL``, pass its length in bytes (for example, ``32``
+    for SHA-256). Otherwise, pass ``0``.
+  * :c:struct:`mcumgr_image_data` now stores a variable-length digest: the
+    ``hash`` buffer is :c:macro:`IMG_MGMT_CLIENT_HASH_MAX_LEN` (64) bytes, and
+    the new ``hash_len`` field holds the actual length. Code that reads ``hash``
+    must use ``hash_len`` instead of assuming :c:macro:`IMG_MGMT_DATA_SHA_LEN`.
+
 POSIX
 =====
 
@@ -2254,6 +2479,19 @@ Random
   Use :kconfig:option:`CONFIG_PSA_CSPRNG_GENERATOR` instead.
 
 * ``CONFIG_CS_CTR_DRBG_PERSONALIZATION`` has been removed. It did not have any effect.
+
+Secure Storage
+==============
+
+* The following files were renamed:
+
+  * ``zephyr/secure_storage/its/store/settings_get.h`` ->
+    ``zephyr/secure_storage/its/store/settings.h``
+  * ``zephyr/secure_storage/its/transform/aead_get.h`` ->
+    ``zephyr/secure_storage/its/transform/aead.h``
+
+* The ZMS backend partition chosen name has been updated from
+  ``secure_storage_its_partition`` to ``zephyr,secure-storage-its-partition`` (:github:`118501`).
 
 Shell
 =====
@@ -2286,6 +2524,11 @@ Tools
 
 Modules
 *******
+
+* The `CHRE <https://github.com/zephyrproject-rtos/chre>`_ framework is no longer an optional
+  module of the Zephyr manifest and its sample moved out of the Zephyr tree. It is now an
+  :ref:`external module <external_module_chre>`; add it to the application manifest to keep using
+  it.
 
 * Support for the `CANopenNode <https://github.com/CANopenNode/CANopenNode>`_ protocol stack was
   moved to an :ref:`external module<external_module_canopennode>`.
@@ -2432,6 +2675,11 @@ Architectures
 
 * The RISC-V specific ``CONFIG_EXTRA_EXCEPTION_INFO`` has been removed. Use
   :kconfig:option:`CONFIG_EXCEPTION_DEBUG` instead. The option is unchanged on Arm and SPARC.
+
+* Both :c:func:`arch_mem_map` and :c:func:`arch_mem_unmap` have changed from
+  returning ``void`` to ``int`` so that the caller can react to error code when
+  assertion is disabled. If assertion is enabled, it currently retains mostly
+  the previous behavior of halting the system.
 
 Video
 =====

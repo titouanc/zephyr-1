@@ -69,17 +69,20 @@ LOG_MODULE_REGISTER(bt_sdp);
 
 struct bt_sdp {
 	struct bt_l2cap_br_chan chan;
-	/* TODO: Allow more than one pending request */
+	struct net_buf *rsp_buf;
+	struct net_buf *recv_pending;
+	struct net_buf_simple_state recv_state;
 };
 
 static sys_slist_t sdp_db = SYS_SLIST_STATIC_INIT(&sdp_db);
-static uint8_t num_services;
 
 static struct bt_sdp bt_sdp_pool[CONFIG_BT_MAX_CONN];
 
+static void sdp_destroy(struct net_buf *buf);
+
 /* Pool for outgoing SDP packets */
 NET_BUF_POOL_FIXED_DEFINE(sdp_pool, CONFIG_BT_MAX_CONN, BT_L2CAP_BUF_SIZE(SDP_MTU),
-			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
+			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, sdp_destroy);
 
 #define SDP_CLIENT_CHAN(_ch) CONTAINER_OF(_ch, struct bt_sdp_client, chan.chan)
 
@@ -116,6 +119,11 @@ enum sdp_client_state {
 	SDP_CLIENT_DISCONNECTING,
 };
 
+/* SDP client flags */
+enum {
+	SDP_CLIENT_FLAG_WAIT_FOR_TX_BUF = 0, /* Wait for TX buffer availability */
+};
+
 struct bt_sdp_client {
 	/* L2CAP channel for SDP client */
 	struct bt_l2cap_br_chan              chan;
@@ -135,6 +143,8 @@ struct bt_sdp_client {
 	uint32_t                             recv_len;
 	/* client state */
 	enum sdp_client_state                state;
+	/* flags */
+	atomic_t                             flags[1];
 };
 
 static struct bt_sdp_client bt_sdp_client_pool[CONFIG_BT_MAX_CONN];
@@ -222,26 +232,39 @@ static void bt_sdp_connected(struct bt_l2cap_chan *chan)
  */
 static void bt_sdp_disconnected(struct bt_l2cap_chan *chan)
 {
-	struct bt_l2cap_br_chan *ch = CONTAINER_OF(chan,
-						   struct bt_l2cap_br_chan,
-						   chan);
-
-	struct bt_sdp *sdp __unused = CONTAINER_OF(ch, struct bt_sdp, chan);
+	struct bt_l2cap_br_chan *ch = CONTAINER_OF(chan, struct bt_l2cap_br_chan, chan);
+	struct bt_sdp *sdp = CONTAINER_OF(ch, struct bt_sdp, chan);
 
 	LOG_DBG("chan %p cid 0x%04x", ch, ch->tx.cid);
+
+	net_buf_drop(&sdp->rsp_buf);
+	net_buf_drop(&sdp->recv_pending);
 }
 
-/* @brief Creates an SDP PDU
+/* @brief Allocates a net buffer for SDP service
  *
- *  Creates an empty SDP PDU and returns the buffer
+ *  Allocates a net buffer without waiting for SDP service and returns the buffer
  *
  *  @param None
  *
  *  @return Pointer to the net_buf buffer
  */
-static struct net_buf *bt_sdp_create_pdu(void)
+static struct net_buf *sdp_svc_create_pdu(void)
 {
-	return bt_l2cap_create_pdu(&sdp_pool, sizeof(struct bt_sdp_hdr));
+	return bt_l2cap_create_pdu_timeout(&sdp_pool, sizeof(struct bt_sdp_hdr), K_NO_WAIT);
+}
+
+/* @brief Allocates a net buffer for SDP Client
+ *
+ *  Allocates a net buffer without waiting for SDP Client and returns the buffer
+ *
+ *  @param None
+ *
+ *  @return Pointer to the net_buf buffer
+ */
+static struct net_buf *sdp_client_create_pdu(void)
+{
+	return bt_l2cap_create_pdu_timeout(&sdp_pool, sizeof(struct bt_sdp_hdr), K_NO_WAIT);
 }
 
 /* @brief Sends out an SDP PDU
@@ -279,24 +302,27 @@ static int bt_sdp_send(struct bt_l2cap_chan *chan, struct net_buf *buf,
  *
  *  Creates and sends an error response PDU
  *
- *  @param chan L2CAP channel
+ *  @param sdp SDP service instance
  *  @param err Error code to be sent in the packet
  *  @param tid Transaction ID to be used in the packet header
  *
  *  @return None
  */
-static void send_err_rsp(struct bt_l2cap_chan *chan, uint16_t err,
-			 uint16_t tid)
+static void send_err_rsp(struct bt_sdp *sdp, uint16_t err, uint16_t tid)
 {
 	struct net_buf *buf;
 
 	LOG_DBG("tid %u, error %u", tid, err);
 
-	buf = bt_sdp_create_pdu();
+	buf = net_buf_take(&sdp->rsp_buf);
+	if (buf == NULL) {
+		LOG_ERR("No valid response buffer");
+		return;
+	}
 
 	net_buf_add_be16(buf, err);
 
-	bt_sdp_send(chan, buf, BT_SDP_ERROR_RSP, tid);
+	bt_sdp_send(&sdp->chan.chan, buf, BT_SDP_ERROR_RSP, tid);
 }
 
 /* @brief Parses data elements
@@ -683,7 +709,8 @@ static uint16_t sdp_svc_search_req(struct bt_sdp *sdp, struct net_buf *buf, uint
 
 	LOG_DBG("max_rec_count %u, cont_recs %u", max_rec_count, cont_recs);
 
-	resp_buf = bt_sdp_create_pdu();
+	resp_buf = net_buf_take(&sdp->rsp_buf);
+	__ASSERT(resp_buf != NULL, "response buffer is NULL");
 	rsp = net_buf_add(resp_buf, sizeof(*rsp));
 
 	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&sdp_db, record, next, node) {
@@ -1349,7 +1376,8 @@ static uint16_t sdp_svc_att_req(struct bt_sdp *sdp, struct net_buf *buf, uint16_
 		state.current_svc = record->index;
 	}
 
-	rsp_buf = bt_sdp_create_pdu();
+	rsp_buf = net_buf_take(&sdp->rsp_buf);
+	__ASSERT(rsp_buf != NULL, "response buffer is NULL");
 	rsp = net_buf_add(rsp_buf, sizeof(*rsp));
 
 	/* cont_state_size should include 1 byte header */
@@ -1418,6 +1446,7 @@ static uint16_t sdp_svc_search_att_req(struct bt_sdp *sdp, struct net_buf *buf, 
 	uint8_t cont_state_size, next_svc = 0U;
 	bool dry_run = false;
 	struct net_buf_simple ssp;
+	struct net_buf_simple_state rsp_state;
 
 	res = parse_service_search_pattern(buf, &ssp);
 	if (res) {
@@ -1478,7 +1507,9 @@ static uint16_t sdp_svc_search_att_req(struct bt_sdp *sdp, struct net_buf *buf, 
 	LOG_DBG("max_att_len 0x%04x, cont_state %u %u %u", max_att_len, next_svc,
 		state.last_att, state.last_att_index);
 
-	rsp_buf = bt_sdp_create_pdu();
+	rsp_buf = net_buf_take(&sdp->rsp_buf);
+	__ASSERT(rsp_buf != NULL, "response buffer is NULL");
+	net_buf_simple_save(&rsp_buf->b, &rsp_state);
 
 	rsp = net_buf_add(rsp_buf, sizeof(*rsp));
 
@@ -1519,7 +1550,8 @@ static uint16_t sdp_svc_search_att_req(struct bt_sdp *sdp, struct net_buf *buf, 
 
 		if (max_att_len < sending_len) {
 			LOG_ERR("Att len exceeds %u < %u", max_att_len, sending_len);
-			net_buf_unref(rsp_buf);
+			net_buf_simple_restore(&rsp_buf->b, &rsp_state);
+			sdp->rsp_buf = net_buf_take(&rsp_buf);
 			return BT_SDP_INVALID_SYNTAX;
 		}
 		max_att_len -= sending_len;
@@ -1528,15 +1560,13 @@ static uint16_t sdp_svc_search_att_req(struct bt_sdp *sdp, struct net_buf *buf, 
 		if (state.pkt_full && !dry_run) {
 			LOG_DBG("Packet full, state.last_att %u", state.last_att);
 
-			if (state.current_svc < num_services) {
-				dry_run = true;
+			dry_run = true;
 
-				/* Add continuation state */
-				net_buf_add_u8(rsp_buf, SDP_SSA_CONT_STATE_SIZE);
-				net_buf_add_u8(rsp_buf, state.current_svc);
-				net_buf_add_u8(rsp_buf, state.last_att);
-				net_buf_add_be32(rsp_buf, state.last_att_index);
-			}
+			/* Add continuation state */
+			net_buf_add_u8(rsp_buf, SDP_SSA_CONT_STATE_SIZE);
+			net_buf_add_u8(rsp_buf, state.current_svc);
+			net_buf_add_u8(rsp_buf, state.last_att);
+			net_buf_add_be32(rsp_buf, state.last_att_index);
 
 			/* Break if it's not a partial response, else dry-run
 			 * Dry run: Look for other services that match
@@ -1616,6 +1646,22 @@ static int bt_sdp_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		return 0;
 	}
 
+	if (sdp->recv_pending != NULL) {
+		LOG_WRN("Last SDP request is not completed, drop it");
+		net_buf_drop(&sdp->recv_pending);
+	}
+
+	/* Take the reference of receiving buffer. Only release it after the progress is done. */
+	sdp->recv_pending = net_buf_ref(buf);
+	net_buf_simple_save(&buf->b, &sdp->recv_state);
+
+	net_buf_drop(&sdp->rsp_buf);
+	sdp->rsp_buf = sdp_svc_create_pdu();
+	if (sdp->rsp_buf == NULL) {
+		LOG_WRN("No net buffers available");
+		return 0;
+	}
+
 	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
 	LOG_DBG("Received SDP code 0x%02x len %u", hdr->op_code, buf->len);
 
@@ -1632,13 +1678,41 @@ static int bt_sdp_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		}
 	}
 
-	if (err) {
+	if (err != 0) {
 		LOG_WRN("SDP error 0x%02x", err);
-		send_err_rsp(chan, err, sys_be16_to_cpu(hdr->tid));
+		send_err_rsp(sdp, err, sys_be16_to_cpu(hdr->tid));
 	}
 
+	net_buf_drop(&sdp->rsp_buf);
+	net_buf_drop(&sdp->recv_pending);
 	return 0;
 }
+
+static void sdp_svc_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	ARRAY_FOR_EACH(bt_sdp_pool, i) {
+		struct bt_sdp *sdp = &bt_sdp_pool[i];
+		struct net_buf *buf;
+
+		buf = net_buf_take(&sdp->recv_pending);
+		if (buf == NULL) {
+			continue;
+		}
+
+		if (sdp->chan.chan.conn == NULL) {
+			net_buf_unref(buf);
+			continue;
+		}
+
+		net_buf_simple_restore(&buf->b, &sdp->recv_state);
+		(void)bt_sdp_recv(&sdp->chan.chan, buf);
+		net_buf_unref(buf);
+	}
+}
+
+static K_WORK_DEFINE(sdp_svc_worker, sdp_svc_work_handler);
 
 /* @brief Callback for SDP connection accept
  *
@@ -1742,9 +1816,30 @@ int bt_sdp_register_service(struct bt_sdp_record *service)
 
 	sys_slist_append(&sdp_db, &service->node);
 
-	num_services++;
-
 	LOG_DBG("Service registered at %u", service->handle);
+
+	return 0;
+}
+
+int bt_sdp_unregister_service(struct bt_sdp_record *service)
+{
+	if (service == NULL) {
+		return -EINVAL;
+	}
+
+	ARRAY_FOR_EACH(bt_sdp_pool, i) {
+		if (bt_sdp_pool[i].chan.chan.conn != NULL) {
+			LOG_WRN("Active SDP channel exists on conn %p",
+				(void *)bt_sdp_pool[i].chan.chan.conn);
+			return -EBUSY;
+		}
+	}
+
+	if (!sys_slist_find_and_remove(&sdp_db, &service->node)) {
+		return -ENOENT;
+	}
+
+	LOG_DBG("Service unregistered at %u", service->handle);
 
 	return 0;
 }
@@ -1763,6 +1858,8 @@ static void sdp_client_req_cleanup(struct bt_sdp_client *session)
 	session->total_len = 0U;
 	/* Clear received length */
 	session->recv_len = 0U;
+	/* Clear flags */
+	atomic_clear(session->flags);
 }
 
 static void sdp_client_cleanup(struct bt_sdp_client *session)
@@ -2138,6 +2235,14 @@ static void sdp_client_work_handler(struct k_work *work)
 			continue;
 		}
 
+		/* Retry the SDP discovery request */
+		if (session->state == SDP_CLIENT_CONNECTED &&
+		    atomic_test_and_clear_bit(session->flags, SDP_CLIENT_FLAG_WAIT_FOR_TX_BUF)) {
+			sdp_client_discover(session);
+			bt_conn_unref(conn);
+			continue;
+		}
+
 		if (k_queue_peek_head(&session->reqs_pending) == NULL) {
 			bt_conn_unref(conn);
 			continue;
@@ -2163,6 +2268,14 @@ failed:
 }
 
 static K_WORK_DEFINE(sdp_client_worker, sdp_client_work_handler);
+
+static void sdp_destroy(struct net_buf *buf)
+{
+	net_buf_destroy(buf);
+
+	bt_work_submit(&sdp_svc_worker);
+	bt_work_submit(&sdp_client_worker);
+}
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
@@ -2190,7 +2303,11 @@ static int sdp_client_ss_search(struct bt_sdp_client *session,
 	struct net_buf *buf;
 	uint8_t uuid128[BT_UUID_SIZE_128];
 
-	buf = bt_sdp_create_pdu();
+	buf = sdp_client_create_pdu();
+	if (buf == NULL) {
+		LOG_WRN("No net buffers available");
+		return -ENOBUFS;
+	}
 
 	/* BT_SDP_SEQ8 means length of sequence is on additional next byte */
 	net_buf_add_u8(buf, BT_SDP_SEQ8);
@@ -2336,7 +2453,11 @@ static int sdp_client_sa_search(struct bt_sdp_client *session,
 		return -ENOMEM;
 	}
 
-	buf = bt_sdp_create_pdu();
+	buf = sdp_client_create_pdu();
+	if (buf == NULL) {
+		LOG_WRN("No net buffers available");
+		return -ENOBUFS;
+	}
 
 	/* Add service record handle  */
 	net_buf_add_be32(buf, param->handle);
@@ -2406,7 +2527,11 @@ static int sdp_client_ssa_search(struct bt_sdp_client *session,
 		}
 	}
 
-	buf = bt_sdp_create_pdu();
+	buf = sdp_client_create_pdu();
+	if (buf == NULL) {
+		LOG_WRN("No net buffers available");
+		return -ENOBUFS;
+	}
 
 	/* BT_SDP_SEQ8 means length of sequence is on additional next byte */
 	net_buf_add_u8(buf, BT_SDP_SEQ8);
@@ -2538,7 +2663,12 @@ static int sdp_client_discover(struct bt_sdp_client *session)
 		break;
 	}
 
-	if (err) {
+	if (err == -ENOBUFS) {
+		atomic_set_bit(session->flags, SDP_CLIENT_FLAG_WAIT_FOR_TX_BUF);
+		return 0;
+	}
+
+	if (err != 0) {
 		/* Notify the result */
 		sdp_client_req_not_resolved(session->chan.chan.conn, session);
 		/* Cleanup current SDP discovery state */

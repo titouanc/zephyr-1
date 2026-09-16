@@ -854,6 +854,16 @@ SECTIONS
     . = ALIGN(CACHE_ALIGN);
   } GROUP_LINK_IN(ROMABLE_REGION)
 
+  /* Move drom0 after the .text region in the shared I/D cache window.
+   * irom0_0_seg and drom0_0_seg share the same origin (unified cache),
+   * so advance the drom counter past the aligned IROM span; otherwise
+   * .flash.rodata would land in the same flash mapping as .text.
+   */
+  .flash_rodata_dummy (NOLOAD) :
+  {
+    . += ALIGN(_instruction_reserved_end - _instruction_reserved_start, CACHE_ALIGN);
+  } GROUP_LINK_IN(RODATA_REGION)
+
   /* Symbols used during the application memory mapping */
   _image_drom_start = LOADADDR(.flash.rodata);
   _image_drom_size = _image_rodata_end -  _image_rodata_start;
@@ -894,7 +904,6 @@ SECTIONS
     *(.xt_except_desc_end)
     *(.dynamic)
     *(.gnu.version_d)
-    __rodata_region_end = .;
     _rodata_end = ABSOLUTE(.);
     /* Literals are also RO data. */
     _lit4_start = ABSOLUTE(.);
@@ -931,6 +940,11 @@ SECTIONS
     LONG(0);
     _rodata_reserved_end = ABSOLUTE(.);
     _image_rodata_end = ABSOLUTE(.);
+    /* The read-only region must span the linker-collected rom sections too:
+     * device API structures live there, and a pointer into one reaches a
+     * syscall as an argument, where it is checked against this region.
+     */
+    __rodata_region_end = .;
   } GROUP_DATA_LINK_IN(RODATA_REGION, ROMABLE_REGION)
 
   /* --- END OF .rodata --- */
