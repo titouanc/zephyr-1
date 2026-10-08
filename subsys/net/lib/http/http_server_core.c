@@ -876,6 +876,19 @@ static int handle_http_request(struct http_client_ctx *client)
 	}
 
 	if (client->data_len > 0) {
+		if (client->cursor < client->buffer ||
+		    client->cursor > client->buffer + sizeof(client->buffer) ||
+		    client->data_len >
+			    (size_t)(client->buffer + sizeof(client->buffer) - client->cursor)) {
+			/* The RX length no longer describes client->buffer, so
+			 * drop the connection before it is used.
+			 */
+			LOG_ERR("Invalid RX state: cursor %p, data_len %zu, buffer %p/%zu",
+				(void *)client->cursor, client->data_len,
+				(void *)client->buffer, sizeof(client->buffer));
+			return -EINVAL;
+		}
+
 		/* Move any remaining data in the buffer. */
 		memmove(client->buffer, client->cursor, client->data_len);
 	}
@@ -1280,7 +1293,7 @@ static void handle_http_data(struct http_server_ctx *ctx, int i)
 		}
 
 		close_client_connection(client);
-	} else if (client->data_len == sizeof(client->buffer)) {
+	} else if (client->data_len >= sizeof(client->buffer)) {
 		LOG_ERR("RX buffer too small to handle request");
 		close_client_connection(client);
 	}
@@ -1440,7 +1453,7 @@ static void handle_h3_bidi_stream(struct http_server_ctx *ctx, int i,
 		LOG_DBG("[%p] H3: stream fd %d closed after complete response",
 			client, closed_fd);
 
-	} else if (client->data_len == sizeof(client->buffer)) {
+	} else if (client->data_len >= sizeof(client->buffer)) {
 		LOG_ERR("RX buffer too small to handle request");
 		close_h3_or_plain_client(client, ctx->fds, ARRAY_SIZE(ctx->fds));
 	} else {
@@ -1828,6 +1841,72 @@ int http_server_sendall(struct http_client_ctx *client, const void *buf, size_t 
 
 		buf = (const char *)buf + out_len;
 		len -= out_len;
+
+		http_client_timer_restart(client);
+	}
+
+	return 0;
+}
+
+/* Send the buffers in iov as one stream of bytes, passing them to the socket in
+ * a single sendmsg() call rather than one send() call per buffer. Whether they
+ * then leave in fewer segments or records depends on the socket, some
+ * implementations of sendmsg() still write each buffer separately. Sockets
+ * without sendmsg() support get one send() call per buffer.
+ *
+ * The iovec array is modified as data is sent, so the caller must not reuse it
+ * afterwards.
+ */
+int http_server_sendall_iov(struct http_client_ctx *client, struct net_iovec *iov, size_t iovlen)
+{
+	struct net_msghdr msg = {
+		.msg_iov = iov,
+		.msg_iovlen = 0,
+	};
+
+	/* Drop empty buffers, which some socket implementations reject */
+	for (size_t i = 0; i < iovlen; i++) {
+		if (iov[i].iov_len > 0) {
+			iov[msg.msg_iovlen++] = iov[i];
+		}
+	}
+
+	while (msg.msg_iovlen > 0) {
+		ssize_t out_len = zsock_sendmsg(client->fd, &msg, 0);
+
+		if (out_len < 0) {
+			if (errno != EOPNOTSUPP && errno != ENOTSUP) {
+				return -errno;
+			}
+
+			/* The socket does not support sendmsg(), send the remaining
+			 * buffers one by one instead.
+			 */
+			for (size_t i = 0; i < msg.msg_iovlen; i++) {
+				int ret = http_server_sendall(client, msg.msg_iov[i].iov_base,
+							      msg.msg_iov[i].iov_len);
+
+				if (ret < 0) {
+					return ret;
+				}
+			}
+
+			return 0;
+		}
+
+		/* Skip what was sent, which may end in the middle of a buffer. */
+		while (out_len > 0 && msg.msg_iovlen > 0) {
+			size_t len = MIN((size_t)out_len, msg.msg_iov->iov_len);
+
+			msg.msg_iov->iov_base = (uint8_t *)msg.msg_iov->iov_base + len;
+			msg.msg_iov->iov_len -= len;
+			out_len -= len;
+
+			if (msg.msg_iov->iov_len == 0) {
+				msg.msg_iov++;
+				msg.msg_iovlen--;
+			}
+		}
 
 		http_client_timer_restart(client);
 	}

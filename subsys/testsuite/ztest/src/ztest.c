@@ -30,20 +30,14 @@ static bool failed_expectation;
 #ifdef CONFIG_ZTEST_SHUFFLE
 #include <time.h>
 #include <zephyr/random/random.h>
-#ifndef CONFIG_ZTEST_REPEAT
-#define NUM_ITER_PER_SUITE CONFIG_ZTEST_SHUFFLE_SUITE_REPEAT_COUNT
-#define NUM_ITER_PER_TEST  CONFIG_ZTEST_SHUFFLE_TEST_REPEAT_COUNT
-#endif
 #endif /* CONFIG_ZTEST_SHUFFLE */
 
 #ifdef CONFIG_ZTEST_REPEAT
 #define NUM_ITER_PER_SUITE CONFIG_ZTEST_SUITE_REPEAT_COUNT
 #define NUM_ITER_PER_TEST  CONFIG_ZTEST_TEST_REPEAT_COUNT
 #else
-#ifndef CONFIG_ZTEST_SHUFFLE
 #define NUM_ITER_PER_SUITE 1
 #define NUM_ITER_PER_TEST  1
-#endif
 #endif
 
 #ifdef CONFIG_ZTEST_COVERAGE_RESET_BEFORE_TESTS
@@ -97,7 +91,7 @@ static void __ztest_show_suite_summary(void);
 static void end_report(void)
 {
 	__ztest_show_suite_summary();
-	if (test_status) {
+	if (test_status != ZTEST_STATUS_OK) {
 		TC_END_REPORT(TC_FAIL);
 	} else {
 		TC_END_REPORT(TC_PASS);
@@ -1353,6 +1347,7 @@ void __weak test_main(void)
 #ifdef ZTEST_UNITTEST
 int main(void)
 {
+	TC_PRINT_RUNID_START;
 	z_init_mock();
 	test_main();
 	end_report();
@@ -1482,7 +1477,7 @@ static int cmd_run_suite(const struct shell *sh, size_t argc, char **argv)
 			val = atoi(state->optarg);
 			if (val < 1) {
 				shell_fprintf(sh, SHELL_ERROR,
-					"Invalid number of suite interations\n");
+					"Invalid number of suite iterations\n");
 				return -ENOEXEC;
 			}
 			repeat_iter = val;
@@ -1602,10 +1597,13 @@ int main(void)
 	k_mem_domain_add_partition(&k_mem_domain_default, &ztest_mem_partition);
 #ifdef Z_MALLOC_PARTITION_EXISTS
 	/* Allow access to malloc() memory */
-	k_mem_domain_add_partition(&k_mem_domain_default, &z_malloc_partition);
+	if (z_malloc_partition.size != 0U) {
+		k_mem_domain_add_partition(&k_mem_domain_default, &z_malloc_partition);
+	}
 #endif
 #endif /* CONFIG_USERSPACE */
 
+	TC_PRINT_RUNID_START;
 	z_init_mock();
 #ifndef CONFIG_ZTEST_SHELL
 	test_main();

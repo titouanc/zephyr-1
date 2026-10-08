@@ -20,6 +20,9 @@
 #define IMX_CCM_PLATFORM_CLK           0x1UL
 #define IMX_CCM_BUS_CLK                0x2UL
 
+/* Cortex-A55 core clock driven by ARM_PLL */
+#define IMX_CCM_ARM_PLL_CLK 0x10UL
+
 /* LPUART */
 #define IMX_CCM_LPUART_CLK             0x300UL
 #define IMX_CCM_LPUART1_CLK            0x300UL
@@ -180,6 +183,16 @@
 #define IMX_CCM_XBAR2_CLK             0x2901UL
 /** XBAR3 peripheral clock identifier */
 #define IMX_CCM_XBAR3_CLK             0x2902UL
+
+/* ENC (EQDC) */
+/** ENC1/EQDC1 peripheral clock identifier */
+#define IMX_CCM_ENC1_CLK               0x2A00UL
+/** ENC2/EQDC2 peripheral clock identifier */
+#define IMX_CCM_ENC2_CLK               0x2A01UL
+/** ENC3/EQDC3 peripheral clock identifier */
+#define IMX_CCM_ENC3_CLK               0x2A02UL
+/** ENC4/EQDC4 peripheral clock identifier */
+#define IMX_CCM_ENC4_CLK               0x2A03UL
 
 /* QTMR */
 #define IMX_CCM_QTMR_CLK               0x6000UL

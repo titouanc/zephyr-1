@@ -128,3 +128,9 @@ ZephyrModuleFile.txt
 
 # Node dependecies
 node_modules
+
+# Log file from mplab_ipe runner
+MPLABXLog.xml
+
+# Per-developer specific preferences for Claude Code
+CLAUDE.local.md

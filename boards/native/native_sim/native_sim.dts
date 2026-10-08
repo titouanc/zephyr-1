@@ -5,6 +5,7 @@
  */
 
 /dts-v1/;
+#include <freq.h>
 #include <posix/posix.dtsi>
 #include <zephyr/dt-bindings/adc/adc.h>
 #include <zephyr/dt-bindings/display/panel.h>
@@ -50,6 +51,7 @@
 	};
 
 	cpus {
+		timebase-frequency = <DT_FREQ_M(1)>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 
@@ -306,8 +308,16 @@
 		};
 	};
 
-	ptp_clock: ptp_clock {
-		compatible = "zephyr,native-ptp-clock";
+	zeth0: zeth0 {
+		compatible = "zephyr,native-tap";
 		status = "okay";
+		zephyr,random-mac-address;
+		zephyr,mac-address-prefix = [00 00 5e 00 53];
+		host-interface = "zeth";
+
+		ptp_clock: ptp_clock {
+			compatible = "zephyr,native-ptp-clock";
+			status = "okay";
+		};
 	};
 };

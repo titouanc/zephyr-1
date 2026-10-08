@@ -24,7 +24,7 @@ extern "C" {
  * @brief Network buffer library
  * @defgroup net_buf Network Buffer Library
  * @since 1.0
- * @version 1.0.0
+ * @version 1.1.0
  * @ingroup os_services
  * @{
  */
@@ -93,7 +93,8 @@ struct net_buf_simple {
 	/**
 	 * Length of the data behind the data pointer.
 	 *
-	 * To determine the max length, use net_buf_simple_max_len(), not #size!
+	 * The room left for more data is net_buf_simple_tailroom(), not net_buf_simple::size
+	 * minus net_buf_simple::len: net_buf_simple::size counts the headroom as well.
 	 */
 	uint16_t len;
 
@@ -940,13 +941,51 @@ static inline size_t net_buf_simple_tailroom(const struct net_buf_simple *buf)
  *
  * This value is depending on the number of bytes being reserved as headroom.
  *
+ * @deprecated Use net_buf_simple_tailroom() to find out how much data can
+ *             still be added and net_buf_simple_headroom() for how much can
+ *             be pushed in front. The size of a scratch area starting at
+ *             net_buf_simple::data is net_buf_simple::len plus the tailroom.
+ *
  * @param buf A valid pointer on a buffer
  *
  * @return Number of bytes usable behind the net_buf_simple::data pointer.
  */
-static inline uint16_t net_buf_simple_max_len(const struct net_buf_simple *buf)
+__deprecated static inline uint16_t net_buf_simple_max_len(const struct net_buf_simple *buf)
 {
 	return buf->size - net_buf_simple_headroom(buf);
+}
+
+/**
+ * @brief Check that a buffer's length and pointers are self-consistent.
+ *
+ * Validates the invariant that must always hold for a well-formed buffer:
+ * @c data points within the backing storage and @c len does not extend past
+ * the end of that storage. A buffer whose #net_buf_simple::len has been
+ * corrupted (for example wrapped to a large value) or whose #net_buf_simple::data
+ * has been moved outside @c __buf..__buf+size fails this check.
+ *
+ * This does not (and cannot) detect a @c len that was changed to a different
+ * but still in-bounds value; it detects only out-of-bounds corruption, which is
+ * what turns into an out-of-bounds read or write when the buffer is used.
+ *
+ * @param buf Buffer to validate.
+ *
+ * @return true if the buffer is self-consistent, false otherwise.
+ */
+static inline bool net_buf_simple_is_valid(const struct net_buf_simple *buf)
+{
+	size_t headroom;
+
+	if (buf == NULL || buf->__buf == NULL || buf->data < buf->__buf) {
+		return false;
+	}
+
+	headroom = net_buf_simple_headroom(buf);
+	if (headroom > buf->size) {
+		return false;
+	}
+
+	return (size_t)buf->len <= (size_t)(buf->size - headroom);
 }
 
 /**
@@ -1664,6 +1703,18 @@ struct net_buf * __must_check net_buf_ref(struct net_buf *buf);
  * This performs an atomic exchange on @p orig. setting it to NULL and
  * returning the previous value.
  *
+ * Use it where ownership of the reference moves, so that the previous owner
+ * is left without a pointer to a buffer it no longer owns:
+ *
+ * @code{.c}
+ * k_fifo_put(&tx_queue, net_buf_take(&buf));
+ * @endcode
+ *
+ * Passing `net_buf_take(&buf)` as an argument is only correct for calls that
+ * always take ownership. A function that takes ownership only on success
+ * leaves the buffer with the caller on error, so the caller needs its pointer
+ * until the function has returned.
+ *
  * @param orig Pointer to the buffer pointer to transfer. Will be set to NULL
  *		on return.
  *
@@ -1722,8 +1773,8 @@ static inline void * __must_check net_buf_user_data(const struct net_buf *buf)
 /**
  * @brief Copy user data from one to another buffer.
  *
- * @param dst A valid pointer to a buffer gettings its user data overwritten.
- * @param src A valid pointer to a buffer gettings its user data copied. User data size must be
+ * @param dst A valid pointer to a buffer getting its user data overwritten.
+ * @param src A valid pointer to a buffer getting its user data copied. User data size must be
  *            equal to or exceed @a dst.
  *
  * @return 0 on success or negative error number on failure.
@@ -2658,13 +2709,38 @@ static inline size_t net_buf_headroom(const struct net_buf *buf)
  *
  * This value is depending on the number of bytes being reserved as headroom.
  *
+ * @deprecated Use net_buf_tailroom() to find out how much data can still be
+ *             added and net_buf_headroom() for how much can be pushed in
+ *             front. The size of a scratch area starting at net_buf::data is
+ *             net_buf::len plus the tailroom.
+ *
  * @param buf A valid pointer on a buffer
  *
  * @return Number of bytes usable behind the net_buf::data pointer.
  */
-static inline uint16_t net_buf_max_len(const struct net_buf *buf)
+__deprecated static inline uint16_t net_buf_max_len(const struct net_buf *buf)
 {
-	return net_buf_simple_max_len(&buf->b);
+	return buf->size - net_buf_headroom(buf);
+}
+
+/**
+ * @brief Check that a buffer's length and pointers are self-consistent.
+ *
+ * Checks that the buffer is still referenced (net_buf::ref is non-zero, so
+ * the buffer has not been returned to its pool) and that its underlying
+ * net_buf_simple passes net_buf_simple_is_valid(). Useful as a guard at
+ * "use" boundaries (e.g. before transmitting or copying out @c len bytes)
+ * to drop a freed or corrupted buffer instead of accessing memory out of
+ * bounds.
+ *
+ * @param buf Buffer to validate.
+ *
+ * @return true if the buffer is referenced and self-consistent, false
+ *         otherwise.
+ */
+static inline bool net_buf_is_valid(const struct net_buf *buf)
+{
+	return buf != NULL && buf->ref > 0 && net_buf_simple_is_valid(&buf->b);
 }
 
 /**
@@ -2706,8 +2782,10 @@ void net_buf_frag_insert(struct net_buf *parent, struct net_buf *frag);
  *
  * Append a new fragment into the buffer fragments list.
  *
- * Note: This function takes ownership of the fragment reference so the
- * caller is not required to unref.
+ * Note: If @p head is not NULL, this function takes ownership of the
+ * fragment reference so the caller is not required to unref. If @p head is
+ * NULL, @p frag is returned with a new reference and the caller keeps its
+ * own.
  *
  * @param head Head of the fragment chain.
  * @param frag Fragment to add.
@@ -2823,15 +2901,20 @@ size_t net_buf_data_match(const struct net_buf *buf, size_t offset, const void *
  * @param buf Network buffer.
  * @param len Total length of data to be skipped.
  *
- * @return Pointer to the fragment or
- *         NULL and pos is 0 after successful skip,
- *         NULL and pos is 0xffff otherwise.
+ * @return The remaining fragment chain, or NULL if all data was skipped.
  */
 static inline struct net_buf *net_buf_skip(struct net_buf *buf, size_t len)
 {
-	while (buf && len--) {
-		net_buf_pull_u8(buf);
-		if (!buf->len) {
+	while (buf != NULL && len > 0U) {
+		size_t to_skip = MIN(len, buf->len);
+
+		/* A zero-capacity fragment has no data buffer to pull from */
+		if (to_skip > 0U) {
+			net_buf_pull(buf, to_skip);
+			len -= to_skip;
+		}
+
+		if (buf->len == 0U) {
 			buf = net_buf_frag_del(NULL, buf);
 		}
 	}

@@ -113,6 +113,7 @@
 #define FF_VOLUME_STRS                                                                             \
 	DT_FOREACH_STATUS_OKAY(zephyr_flash_disk, _FF_DISK_NAME)                                   \
 	DT_FOREACH_STATUS_OKAY(zephyr_ram_disk, _FF_DISK_NAME)                                     \
+	DT_FOREACH_STATUS_OKAY(zephyr_memc_ram_disk, _FF_DISK_NAME)                                \
 	DT_FOREACH_STATUS_OKAY(zephyr_sdmmc_disk, _FF_DISK_NAME)                                   \
 	DT_FOREACH_STATUS_OKAY(zephyr_mmc_disk, _FF_DISK_NAME)                                     \
 	IF_ENABLED(CONFIG_SDMMC_STM32, (DT_FOREACH_STATUS_OKAY(st_stm32_sdmmc, _FF_DISK_NAME)))    \
@@ -153,7 +154,7 @@
  */
 /*
  * The FS_FATFS_WINDOW_ALIGNMENT is used to align win buffer of FATFS structure
- * to allow more optimal use with MCUs that require specific bufer alignment
+ * to allow more optimal use with MCUs that require specific buffer alignment
  * for DMA to work.
  */
 #if defined(CONFIG_FS_FATFS_WINDOW_ALIGNMENT)

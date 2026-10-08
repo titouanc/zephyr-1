@@ -257,7 +257,7 @@ void board_early_init_hook(void)
 
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(enet))
 	CLOCK_AttachClk(kNONE_to_ENETRMII);
-#if defined(CONFIG_PTP_CLOCK_NXP_ENET_QOS)
+#if defined(CONFIG_PTP_CLOCK_NXP_ENET_QOS) || defined(CONFIG_PTP_CLOCK_DWC_MAC)
 	/* Attach PLL0 (150 MHz) to the ENET QoS PTP reference clock. */
 	CLOCK_AttachClk(kPLL0_to_ENETPTPREF);
 	CLOCK_SetClkDiv(kCLOCK_DivEnetptprefClk, 1u);
@@ -313,6 +313,9 @@ void board_early_init_hook(void)
 	flexspi_clock_set_freq(MCUX_FLEXSPI_CLK,
 			       DT_PROP(DT_NODELABEL(ext_flash_ctrl), spi_max_frequency));
 	enable_cache64();
+#elif CONFIG_FLASH_MCUX_FLEXSPI_NAND
+	flexspi_clock_set_freq(MCUX_FLEXSPI_CLK,
+			       DT_PROP(DT_NODELABEL(mx35lf1ge4ab), spi_max_frequency));
 #endif
 
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(smartdma))

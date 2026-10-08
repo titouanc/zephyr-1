@@ -298,6 +298,8 @@ static struct net_nat4_entry *conn_track_create(struct net_pkt *pkt,
 		}
 	}
 
+	LOG_ERR("Failed to add nat4 entry");
+
 	return NULL;
 
 new_entry:
@@ -549,7 +551,7 @@ int net_ipv4_table_rule_add(struct net_iptable_rule_params *param)
 	rule->reply_timeout = param->reply_timeout;
 
 	iptable_rule_list_insert(rule);
-	return 0;
+	return rule->idx;
 }
 
 void net_ipv4_table_rule_del(int idx)
@@ -657,6 +659,11 @@ static bool ipv4_nat_process(struct npf_test *test, struct net_pkt *pkt)
 	} else if (dir == NET_NAT_DIR_REPLY) {
 		do_dnat(pkt, iphdr, l4hdr, entry);
 		goto match;
+	}
+
+	/* Traffic to this host is delivered locally, never translated */
+	if (net_ipv4_is_my_addr_raw(iphdr->dst)) {
+		goto no_match;
 	}
 
 	rule = iptable_rule_match(pkt, iphdr);

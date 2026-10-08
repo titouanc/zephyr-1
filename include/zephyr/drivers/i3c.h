@@ -347,6 +347,9 @@ enum i3c_data_rate {
 /** Skip I3C broadcast header. Private Transfers only. */
 #define I3C_MSG_NBCH			BIT(4)
 
+/** NACK is expected from target */
+#define I3C_MSG_NOACK_EXPECTED		BIT(5)
+
 /** I3C HDR Mode 0 */
 #define I3C_MSG_HDR_MODE0		BIT(0)
 
@@ -489,6 +492,20 @@ struct i3c_config_controller {
 	} scl_od_min;
 
 	/**
+	 * Requested minimum SCL Push-Pull clock periods.
+	 */
+	struct {
+		/**
+		 * Requested minimum SCL Push-Pull HIGH period in nanoseconds.
+		 *
+		 * Some speed-limited targets require a larger Push-Pull SCL
+		 * HIGH period than the bus minimum, as advertised through the
+		 * GETMXDS CCC.
+		 */
+		uint32_t high_ns;
+	} scl_pp_min;
+
+	/**
 	 * Bit mask of supported HDR modes (0 - 7).
 	 *
 	 * This can be used to enable or disable HDR mode
@@ -509,6 +526,7 @@ struct i3c_config_custom {
 	/** ID of the configuration parameter. */
 	uint32_t id;
 
+	/** Value or pointer to the configuration parameter */
 	union {
 		/** Value of configuration parameter. */
 		uintptr_t val;
@@ -1083,6 +1101,9 @@ struct i3c_device_desc {
 	 */
 	uint8_t dcr;
 
+	/**
+	 * Maximum data speed (GETMXDS CCC).
+	 */
 	struct {
 		/** Maximum Read Speed */
 		uint8_t maxrd;
@@ -1094,6 +1115,9 @@ struct i3c_device_desc {
 		uint32_t max_read_turnaround;
 	} data_speed;
 
+	/**
+	 * Maximum data lengths (GETMXDS CCC).
+	 */
 	struct {
 		/** Maximum Read Length */
 		uint16_t mrl;
@@ -1160,7 +1184,7 @@ struct i3c_device_desc {
 		uint8_t getcap4;
 	} getcaps;
 
-	/* Describes Controller Feature Capabilities */
+	/** Describes Controller Feature Capabilities */
 	struct {
 		/**
 		 * CRCAPS1
@@ -1251,6 +1275,9 @@ struct i3c_dev_attached_list {
 	 */
 	struct i3c_addr_slots addr_slots;
 
+	/**
+	 * Linked lists of attached I3C and I2C devices.
+	 */
 	struct {
 		/**
 		 * Linked list of attached I3C devices.
@@ -1498,8 +1525,7 @@ struct i3c_i2c_device_desc *i3c_dev_list_i2c_addr_find(const struct device *dev,
  *
  * @kconfig_dep{CONFIG_I3C_CONTROLLER}
  *
- * @param[in] addr_slots Pointer to address slots struct.
- * @param[in] dev_list Pointer to the device list struct.
+ * @param[in] dev Pointer to the controller device driver instance.
  * @param[in] pid Provisioned ID of device to be assigned address.
  * @param[in] must_match True if PID must match devices in
  *			 the device list. False otherwise.
@@ -1517,8 +1543,7 @@ struct i3c_i2c_device_desc *i3c_dev_list_i2c_addr_find(const struct device *dev,
  *                 has an address assigned or invalid function
  *                 arguments.
  */
-int i3c_dev_list_daa_addr_helper(struct i3c_addr_slots *addr_slots,
-				 const struct i3c_dev_list *dev_list,
+int i3c_dev_list_daa_addr_helper(const struct device *dev,
 				 uint64_t pid, bool must_match,
 				 bool assigned_okay,
 				 struct i3c_device_desc **target,
@@ -1724,8 +1749,8 @@ static inline int i3c_recover_bus(const struct device *dev)
  * @param target Pointer to the target device descriptor
  *
  * @retval 0 on success.
- * @retval -EINVAL Address is not available, or the device
- *     has already been attached before.
+ * @retval -EADDRNOTAVAIL Address is not available.
+ * @retval -EALREADY Device has already been attached before.
  */
 int i3c_attach_i3c_device(struct i3c_device_desc *target);
 
@@ -1776,7 +1801,7 @@ int i3c_reattach_i3c_device(struct i3c_device_desc *target, uint8_t old_dyn_addr
  * @param target Pointer to the target device descriptor
  *
  * @retval 0 on success.
- * @retval -EINVAL Device is already detached.
+ * @retval -EALREADY Device is already detached.
  */
 int i3c_detach_i3c_device(struct i3c_device_desc *target);
 
@@ -1822,8 +1847,8 @@ static inline bool i3c_is_i3c_device_attached(struct i3c_device_desc *target)
  * @param target Pointer to the target device descriptor
  *
  * @retval 0 on success.
- * @retval -EINVAL Address is not available, or the device
- *     has already been attached before.
+ * @retval -EADDRNOTAVAIL Address is not available.
+ * @retval -EALREADY Device has already been attached before.
  */
 int i3c_attach_i2c_device(struct i3c_i2c_device_desc *target);
 
@@ -1844,7 +1869,7 @@ int i3c_attach_i2c_device(struct i3c_i2c_device_desc *target);
  * @param target Pointer to the target device descriptor
  *
  * @retval 0 on success.
- * @retval -EINVAL Device is already detached.
+ * @retval -EALREADY Device is already detached.
  */
 int i3c_detach_i2c_device(struct i3c_i2c_device_desc *target);
 
@@ -2013,6 +2038,8 @@ static inline int z_impl_i3c_do_ccc_cb(const struct device *dev,
  * @retval 0 on success.
  * @retval -EBUSY Bus is busy.
  * @retval -EIO General input / output error.
+ * @retval -ENODATA If message has flag I3C_MSG_NOACK_EXPECTED set and
+ *		    the target NACK the transfer.
  */
 __syscall int i3c_transfer(struct i3c_device_desc *target,
 			   struct i3c_msg *msgs, uint8_t num_msgs);

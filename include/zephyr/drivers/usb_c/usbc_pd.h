@@ -452,7 +452,7 @@ union pd_fixed_supply_pdo_source {
 		/** Dual-Role Power */
 		uint32_t dual_role_power : 1;
 		/** Fixed supply. SET TO PDO_FIXED  */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -486,7 +486,7 @@ union pd_fixed_supply_pdo_sink {
 		/** Reserved – Shall be set to zero. */
 		uint32_t reserved0 : 3;
 		/** Fast Role Swap required USB Type-C Current */
-		enum pd_frs_type frs_required : 2;
+		uint32_t frs_required : 2;
 		/** Dual-Role Data */
 		uint32_t dual_role_data : 1;
 		/** USB Communications Capable */
@@ -498,7 +498,7 @@ union pd_fixed_supply_pdo_sink {
 		/** Dual-Role Power */
 		uint32_t dual_role_power : 1;
 		/** Fixed supply. SET TO PDO_FIXED  */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -546,7 +546,7 @@ union pd_variable_supply_pdo_source {
 		/** Maximum Voltage in 50mV units */
 		uint32_t max_voltage : 10;
 		/** Variable supply. SET TO PDO_VARIABLE  */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -566,7 +566,7 @@ union pd_variable_supply_pdo_sink {
 		/** Maximum Voltage in 50mV units */
 		uint32_t max_voltage : 10;
 		/** Variable supply. SET TO PDO_VARIABLE  */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -614,7 +614,7 @@ union pd_battery_supply_pdo_source {
 		/** Maximum Voltage in 50mV units */
 		uint32_t max_voltage : 10;
 		/** Battery supply. SET TO PDO_BATTERY  */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -634,7 +634,7 @@ union pd_battery_supply_pdo_sink {
 		/** Maximum Voltage in 50mV units */
 		uint32_t max_voltage : 10;
 		/** Battery supply. SET TO PDO_BATTERY  */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -696,7 +696,7 @@ union pd_augmented_supply_pdo_source {
 		 */
 		uint32_t reserved3 : 2;
 		/** Augmented Power Data Object (APDO). SET TO PDO_AUGMENTED */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -728,7 +728,7 @@ union pd_augmented_supply_pdo_sink {
 		 */
 		uint32_t reserved3 : 2;
 		/** Augmented Power Data Object (APDO). SET TO PDO_AUGMENTED */
-		enum pdo_type type : 2;
+		uint32_t type : 2;
 	};
 	/** Raw PDO value */
 	uint32_t raw_value;
@@ -962,9 +962,16 @@ enum pd_ctrl_msg_type {
 	/** Get_Country_Codes Message */
 	PD_CTRL_GET_COUNTRY_CODES       = 21,
 	/** Get_Sink_Cap_Extended Message */
-	PD_CTRL_GET_SINK_CAP_EXT        = 22
+	PD_CTRL_GET_SINK_CAP_EXT        = 22,
+	/** Get_Source_Info Message */
+	PD_CTRL_GET_SOURCE_INFO         = 23,
+	/** Get_Revision Message */
+	PD_CTRL_GET_REVISION            = 24,
 
-	/** 23-31 Reserved */
+	/** 25-31 Reserved */
+
+	/** Number of Control Message types */
+	PD_CTRL_MSG_COUNT
 };
 
 /**
@@ -993,8 +1000,19 @@ enum pd_data_msg_type {
 
 	/** Enter USB message */
 	PD_DATA_ENTER_USB       = 8,
+	/** EPR_Request Message */
+	PD_DATA_EPR_REQUEST     = 9,
+	/** EPR_Mode Message */
+	PD_DATA_EPR_MODE        = 10,
+	/** Source_Info Message */
+	PD_DATA_SOURCE_INFO     = 11,
+	/** Revision Message */
+	PD_DATA_REVISION        = 12,
 	/** Vendor Defined Message */
 	PD_DATA_VENDOR_DEF      = 15,
+
+	/** Number of Data Message types */
+	PD_DATA_MSG_COUNT
 };
 
 /**
@@ -1032,8 +1050,24 @@ enum pd_ext_msg_type {
 	PD_EXT_COUNTRY_INFO             = 13,
 	/** Country_Info Message */
 	PD_EXT_COUNTRY_CODES            = 14,
+	/** Sink_Capabilities_Extended Message */
+	PD_EXT_SINK_CAP                 = 15,
+	/** Extended_Control Message */
+	PD_EXT_EXTENDED_CONTROL         = 16,
+	/** EPR_Source_Capabilities Message */
+	PD_EXT_EPR_SOURCE_CAP           = 17,
+	/** EPR_Sink_Capabilities Message */
+	PD_EXT_EPR_SINK_CAP             = 18,
 
-	/*8 15-31 Reserved */
+	/** 19-29 Reserved */
+
+	/** Vendor_Defined_Extended Message */
+	PD_EXT_VENDOR_DEFINED           = 30,
+
+	/** 31 Reserved */
+
+	/** Number of Extended Message types */
+	PD_EXT_MSG_COUNT
 };
 
 /**

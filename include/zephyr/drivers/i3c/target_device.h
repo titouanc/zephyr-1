@@ -260,7 +260,7 @@ struct i3c_target_callbacks {
 	 * to this target.
 	 *
 	 * This function is invoked by the active controller when it handoffs
-	 * controllership to this target. This can happen wither the target has
+	 * controllership to this target. This can happen whether the target has
 	 * requested it or if the active controller chooses to handoff to the
 	 * controller capable target.
 	 *
@@ -272,10 +272,38 @@ struct i3c_target_callbacks {
 	int (*controller_handoff_cb)(struct i3c_target_config *config);
 };
 
+/**
+ * @def_driverbackendgroup{I3C Target Device,i3c_target_device}
+ * @{
+ */
+
+/**
+ * @brief Instruct the I3C target device driver to register itself with its bus controller.
+ */
+typedef int (*i3c_target_api_driver_register_t)(const struct device *dev);
+
+/**
+ * @brief Instruct the I3C target device driver to unregister itself from its bus controller.
+ */
+typedef int (*i3c_target_api_driver_unregister_t)(const struct device *dev);
+
+/**
+ * @driver_ops{I3C Target Device}
+ */
 __subsystem struct i3c_target_driver_api {
-	int (*driver_register)(const struct device *dev);
-	int (*driver_unregister)(const struct device *dev);
+	/**
+	 * @driver_ops_mandatory Instruct the I3C target device driver to register itself with
+	 * its bus controller.
+	 */
+	i3c_target_api_driver_register_t driver_register;
+	/**
+	 * @driver_ops_mandatory Instruct the I3C target device driver to unregister itself from
+	 * its bus controller.
+	 */
+	i3c_target_api_driver_unregister_t driver_unregister;
 };
+
+/** @} */
 
 /**
  * @brief Accept or Decline Controller Handoffs

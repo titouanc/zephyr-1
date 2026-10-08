@@ -105,6 +105,13 @@ void *z_vrfy_zsock_get_context_object(int sock)
 #include <zephyr/syscalls/zsock_get_context_object_mrsh.c>
 #endif
 
+bool net_socket_port_in_use(enum net_ip_protocol proto, uint16_t local_port,
+			    const struct net_sockaddr *local_addr)
+{
+	return net_context_port_in_use(proto, local_port, local_addr) ||
+	       net_socket_offloaded_port_in_use(proto, local_port, local_addr);
+}
+
 int z_impl_zsock_socket(int family, int type, int proto)
 {
 	STRUCT_SECTION_FOREACH(net_socket_register, sock_family) {
@@ -153,6 +160,14 @@ extern int zvfs_close(int fd);
 int z_impl_zsock_close(int sock)
 {
 	return zvfs_close(sock);
+}
+
+/*
+ * Runs on every close path, even when zsock_close() is bypassed.
+ */
+void zvfs_socket_close_hook(int fd)
+{
+	net_socket_offloaded_port_untrack(fd);
 }
 
 #ifdef CONFIG_USERSPACE
@@ -223,6 +238,9 @@ int z_impl_zsock_bind(int sock, const struct net_sockaddr *addr, net_socklen_t a
 	SYS_PORT_TRACING_OBJ_FUNC_ENTER(socket, bind, sock, addr, addrlen);
 
 	ret = VTABLE_CALL(bind, sock, addr, addrlen);
+	if (ret == 0) {
+		net_socket_offloaded_port_bind(sock, addr);
+	}
 
 	SYS_PORT_TRACING_OBJ_FUNC_EXIT(socket, bind, sock, ret < 0 ? -errno : ret);
 
@@ -912,9 +930,12 @@ int z_impl_zsock_getsockopt(int sock, int level, int optname,
 int z_vrfy_zsock_getsockopt(int sock, int level, int optname,
 			    void *optval, net_socklen_t *optlen)
 {
-	net_socklen_t kernel_optlen = *(net_socklen_t *)optlen;
+	net_socklen_t kernel_optlen;
 	void *kernel_optval;
 	int ret;
+
+	K_OOPS(k_usermode_from_copy(&kernel_optlen, optlen,
+		sizeof(net_socklen_t)));
 
 	if (K_SYSCALL_MEMORY_WRITE(optval, kernel_optlen)) {
 		errno = -EPERM;

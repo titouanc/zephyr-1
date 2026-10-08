@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(modem_chat, CONFIG_MODEM_MODULES_LOG_LEVEL);
 #include <string.h>
 
 #include <zephyr/modem/chat.h>
+#include <zephyr/sys/__assert.h>
 
 #include "modem_workqueue.h"
 
@@ -112,6 +113,11 @@ static void modem_chat_log_received_command(struct modem_chat *chat)
 
 static void modem_chat_script_stop(struct modem_chat *chat, enum modem_chat_script_result result)
 {
+	struct modem_chat_script_completion_info info;
+	modem_chat_script_callback callback;
+	uint16_t script_chat_it;
+	void *user_data;
+
 	if ((chat == NULL) || (chat->script == NULL)) {
 		return;
 	}
@@ -125,10 +131,21 @@ static void modem_chat_script_stop(struct modem_chat *chat, enum modem_chat_scri
 		LOG_WRN("%s: timed out", chat->script->name);
 	}
 
-	/* Call back with result */
-	if (chat->script->callback != NULL) {
-		chat->script->callback(chat, result, chat->user_data);
+	/* modem_chat_script_next advances the iterator past the end of the array */
+	script_chat_it = chat->script_chat_it;
+	if ((result == MODEM_CHAT_SCRIPT_RESULT_SUCCESS) &&
+	    (chat->script->script_chats_size > 0) &&
+	    (script_chat_it == chat->script->script_chats_size)) {
+		script_chat_it--;
 	}
+
+	/* Cache all callback information so it remains valid after internal state reset */
+	info.script = chat->script;
+	info.script_chat = (chat->script->script_chats_size > 0)
+				       ? &chat->script->script_chats[script_chat_it]
+				       : NULL;
+	callback = chat->script->callback;
+	user_data = chat->user_data;
 
 	/* Clear parse_match in case it is stored in the script being stopped */
 	if ((chat->parse_match != NULL) &&
@@ -154,6 +171,11 @@ static void modem_chat_script_stop(struct modem_chat *chat, enum modem_chat_scri
 
 	/* Clear script running state */
 	atomic_clear_bit(&chat->script_state, MODEM_CHAT_SCRIPT_STATE_RUNNING_BIT);
+
+	/* Call back with result */
+	if (callback != NULL) {
+		callback(chat, result, &info, user_data);
+	}
 
 	/* Store result of script for script stoppted indication */
 	chat->script_result = result;
@@ -249,6 +271,15 @@ static void modem_chat_script_next(struct modem_chat *chat, bool initial)
 	LOG_DBG("%s: step: %u", chat->script->name, chat->script_chat_it);
 
 	script_chat = &chat->script->script_chats[chat->script_chat_it];
+
+#if defined(CONFIG_MODEM_CHAT_COMMANDS_CONDITIONAL)
+	if ((script_chat->run_check != NULL) && !script_chat->run_check(chat->user_data)) {
+		/* Current chat should be skipped, reschedule work immediately to run next step */
+		LOG_DBG("skipping: %.*s", script_chat->request_size, script_chat->request);
+		modem_work_schedule(&chat->script_send_timeout_work, K_NO_WAIT);
+		return;
+	}
+#endif
 
 	/* Continue script */
 	if (modem_chat_script_chat_has_request(chat)) {
@@ -902,6 +933,8 @@ bool modem_chat_is_running(struct modem_chat *chat)
 int modem_chat_run_script_async(struct modem_chat *chat, const struct modem_chat_script *script)
 {
 	bool script_is_running;
+
+	__ASSERT_NO_MSG(script != NULL);
 
 	if (chat->pipe == NULL) {
 		return -EPERM;

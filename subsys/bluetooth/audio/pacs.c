@@ -1260,6 +1260,10 @@ static void deferred_nfy_work_handler(struct k_work *work)
 
 static void pacs_auth_pairing_complete(struct bt_conn *conn, bool bonded)
 {
+	if (!bt_conn_is_type(conn, BT_CONN_TYPE_LE)) {
+		return;
+	}
+
 	LOG_DBG("%s paired (%sbonded)", bt_conn_dst_str(conn),
 		bonded ? "" : "not ");
 
@@ -1312,6 +1316,10 @@ static void pacs_security_changed(struct bt_conn *conn, bt_security_t level,
 	struct bt_conn_info info;
 	int err;
 
+	if (!bt_conn_is_type(conn, BT_CONN_TYPE_LE)) {
+		return;
+	}
+
 	LOG_DBG("%s changed security level to %d", bt_conn_dst_str(conn), level);
 
 	if (sec_err != BT_SECURITY_ERR_SUCCESS || level <= BT_SECURITY_L1) {
@@ -1348,6 +1356,10 @@ static void pacs_disconnected(struct bt_conn *conn, uint8_t reason)
 	struct pacs_client *client;
 
 	ARG_UNUSED(reason);
+
+	if (!bt_conn_is_type(conn, BT_CONN_TYPE_LE)) {
+		return;
+	}
 
 	client = client_lookup_conn(conn);
 	if (client == NULL) {
@@ -1442,7 +1454,7 @@ int bt_pacs_cap_register(enum bt_audio_dir dir, struct bt_pacs_cap *cap)
 	}
 
 	LOG_DBG("cap %p dir %s codec_cap id 0x%02x codec_cap cid 0x%04x codec_cap vid 0x%04x", cap,
-		bt_audio_dir_str(dir), codec_cap->id, codec_cap->cid, codec_cap->vid);
+		bt_audio_dir_to_str(dir), codec_cap->id, codec_cap->cid, codec_cap->vid);
 
 	sys_slist_append(pac, &cap->_node);
 
@@ -1485,7 +1497,7 @@ int bt_pacs_cap_unregister(enum bt_audio_dir dir, struct bt_pacs_cap *cap)
 		return -EINVAL;
 	}
 
-	LOG_DBG("cap %p dir %s", cap, bt_audio_dir_str(dir));
+	LOG_DBG("cap %p dir %s", cap, bt_audio_dir_to_str(dir));
 
 	if (!sys_slist_find_and_remove(pac, &cap->_node)) {
 		return -ENOENT;
